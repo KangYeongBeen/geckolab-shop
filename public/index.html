@@ -193,12 +193,12 @@
     const grid = document.getElementById('productGrid');
     document.getElementById('productCount').textContent = `${list.length}개 상품`;
     grid.innerHTML = list.map(p => `
-      <div class="product-card" onclick="openProduct('${p.id}')">
+      <div class="product-card" onclick="openProduct('${escapeHtml(p.id)}')">
         <div class="product-img-wrap">
           ${p.imageUrl
             ? `<img src="${p.imageUrl}" alt="${p.name}" style="width:100%;height:100%;object-fit:cover;">`
             : `<div class="product-emoji">${p.emoji || '🦎'}</div>`}
-          ${p.badge ? `<span class="product-badge ${p.badgeClass || 'badge-new'}">${p.badge}</span>` : ''}
+          ${p.badge ? `<span class="product-badge ${escapeHtml(p.badgeClass || 'badge-new')}">${escapeHtml(p.badge)}</span>` : ''}
           <button class="quick-add" onclick="event.stopPropagation(); quickAdd('${p.id}')">+ 빠른 추가</button>
         </div>
         <div class="product-info">
@@ -258,20 +258,29 @@
     document.getElementById('modalReviews').innerHTML = `
       <div class="reviews-title">리뷰 (${revs.length})</div>
       ${revs.length === 0 ? '<p style="color:var(--text3);font-size:13px;">아직 리뷰가 없어요!</p>' :
-        revs.map(r => `
+        revs.map(r => {
+          const likedBy = r.likedBy || [];
+          const liked = currentUser && likedBy.includes(currentUser.uid);
+          const likeCount = likedBy.length;
+          return `
           <div class="review-item">
             <div class="review-header">
-              <div class="review-avatar">${(r.nickname||'?')[0]}</div>
+              <div class="review-avatar">${escapeHtml((r.nickname||'?')[0])}</div>
               <div class="review-meta">
-                <div class="review-name">${r.nickname || '익명'}</div>
-                <div class="review-date">${r.date || ''}</div>
+                <div class="review-name">${escapeHtml(r.nickname || '익명')}</div>
+                <div class="review-date">${escapeHtml(r.date || '')}</div>
               </div>
-              <div class="review-stars">${'★'.repeat(r.stars)}</div>
+              <div class="review-stars">${'★'.repeat(Math.min(Math.max(parseInt(r.stars)||0,0),5))}</div>
             </div>
-            <div class="review-body">${r.text}</div>
-            ${r.reviewImageUrl ? `<img src="${r.reviewImageUrl}" alt="리뷰 이미지" style="max-width:100%;max-height:200px;object-fit:contain;border-radius:6px;margin-top:10px;cursor:pointer;" onclick="window.open('${r.reviewImageUrl}','_blank')">` : ''}
+            <div class="review-body">${escapeHtml(r.text)}</div>
+            ${r.reviewImageUrl && r.reviewImageUrl.startsWith('https://') ? `<img src="${escapeHtml(r.reviewImageUrl)}" alt="리뷰 이미지" style="max-width:100%;max-height:200px;object-fit:contain;border-radius:6px;margin-top:10px;cursor:pointer;" onclick="window.open(this.src,'_blank')">` : ''}
+            <div class="review-footer">
+              <button class="like-btn ${liked ? 'liked' : ''}" onclick="toggleReviewLike('${escapeHtml(currentProduct?.id||'')}','${escapeHtml(r.id)}')">
+                👍 도움이 돼요 ${likeCount > 0 ? `<span class="like-count">${likeCount}</span>` : ''}
+              </button>
+            </div>
           </div>
-        `).join('')}
+        `}).join('')}
     `;
 
     const rfEl = document.getElementById('reviewFormSection');
@@ -310,6 +319,11 @@
   window.submitReview = async function(productId) {
     const text = document.getElementById('reviewText').value.trim();
     if (!text) { showToast('리뷰 내용을 입력해주세요.'); return; }
+
+    // 1인 1리뷰 체크
+    const existingRevSnap = await getDocs(collection(db, 'products', productId, 'reviews'));
+    const alreadyWrote = existingRevSnap.docs.some(d => d.data().uid === currentUser.uid);
+    if (alreadyWrote) { showToast('이미 이 상품에 리뷰를 작성했어요!', 'error'); return; }
 
     const submitBtn = document.querySelector('.review-submit');
     if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '등록 중...'; }
@@ -404,92 +418,168 @@
     const el = document.getElementById('noticeList');
     if (!notices.length) { el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px;">공지사항이 없어요.</div>'; return; }
     el.innerHTML = notices.map((n, i) => `
-      <div class="board-item" onclick="viewNotice('${n.id}','${encodeURIComponent(n.title)}','${encodeURIComponent(n.content)}','${n.author||'관리자'}','${n.date||''}')">
+      <div class="board-item" onclick="viewNotice('${escapeHtml(n.id)}','${encodeURIComponent(n.title)}','${encodeURIComponent(n.content)}','${escapeHtml(n.author||'관리자')}','${escapeHtml(n.date||'')}')">
         <span class="board-num">${notices.length - i}</span>
-        <span class="board-title">${n.title}${i===0?'<span class="board-badge">NEW</span>':''}</span>
-        <span class="board-author">${n.author||'관리자'}</span>
-        <span class="board-date">${n.date||''}</span>
+        <span class="board-title">${escapeHtml(n.title)}${i===0?'<span class="board-badge">NEW</span>':''}</span>
+        <span class="board-author">${escapeHtml(n.author||'관리자')}</span>
+        <span class="board-date">${escapeHtml(n.date||'')}</span>
       </div>
     `).join('');
   }
 
   window.viewNotice = function(id, title, content, author, date) {
     document.getElementById('noticeViewTitle').textContent = decodeURIComponent(title);
-    document.getElementById('noticeViewMeta').textContent = `${author} | ${date}`;
-    document.getElementById('noticeViewBody').innerHTML = decodeURIComponent(content).replace(/\n/g,'<br>');
+    document.getElementById('noticeViewMeta').textContent = `${escapeHtml(author)} | ${escapeHtml(date)}`;
+    document.getElementById('noticeViewBody').innerHTML = escapeHtml(decodeURIComponent(content)).split('\n').join('<br>');
     document.getElementById('noticeViewModal').classList.add('open');
   };
 
-  window.submitNotice = async function() {
-    const title = document.getElementById('noticeWriteTitle').value.trim();
-    const content = document.getElementById('noticeWriteContent').value.trim();
+  // ── 1대1 문의 제출 ─────────────────────────────────────
+  window.submitInquiry = async function() {
+    const title = document.getElementById('inquiryTitle').value.trim();
+    const content = document.getElementById('inquiryContent').value.trim();
     if (!title || !content) { showToast('제목과 내용을 입력해주세요.'); return; }
     const now = new Date();
     const dateStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`;
-    await addDoc(collection(db, 'notices'), { title, content, author: '관리자', date: dateStr, createdAt: serverTimestamp() });
-    closeNoticeWrite();
-    await loadNotices();
-    showToast('공지사항이 등록됐어요! 📢', 'success');
-  };
-
-  // ── 관리자: 상품 등록 (이미지 업로드 포함) ──────────────
-  window.submitNewProduct = async function() {
-    const name = document.getElementById('newProductName').value.trim();
-    const category = document.getElementById('newProductCategory').value;
-    const price = parseInt(document.getElementById('newProductPrice').value);
-    const origPriceRaw = document.getElementById('newProductOrigPrice').value;
-    const origPrice = origPriceRaw ? parseInt(origPriceRaw) : null;
-    const badge = document.getElementById('newProductBadge').value || null;
-    const emoji = document.getElementById('newProductEmoji').value || '🦎';
-    const desc = document.getElementById('newProductDesc').value.trim();
-    const imageFile = document.getElementById('newProductImage').files[0];
-
-    if (!name || !price || !desc) { showToast('필수 항목을 입력해주세요.'); return; }
-
-    const categoryLabels = { habitat: '사육환경', feeding: '먹이/영양제', accessory: '악세서리' };
-    const badgeClasses = { NEW: 'badge-new', BEST: 'badge-best', SALE: 'badge-sale' };
-
-    const submitBtn = document.getElementById('productSubmitBtn');
-    submitBtn.disabled = true;
-    submitBtn.textContent = '등록 중...';
-
-    let imageUrl = null;
-
-    // 이미지 있으면 Storage 업로드
-    if (imageFile) {
-      try {
-        const storageRef = ref(storage, `products/${Date.now()}_${imageFile.name}`);
-        const uploadTask = await uploadBytesResumable(storageRef, imageFile);
-        imageUrl = await getDownloadURL(uploadTask.ref);
-      } catch (e) {
-        showToast('이미지 업로드 실패: ' + e.message, 'error');
-        submitBtn.disabled = false;
-        submitBtn.textContent = '상품 등록';
-        return;
-      }
-    }
-
-    await addDoc(collection(db, 'products'), {
-      name, category, categoryLabel: categoryLabels[category],
-      badge, badgeClass: badge ? badgeClasses[badge] : null,
-      price, origPrice, emoji, imageUrl,
-      rating: 5.0, reviewCount: 0, desc,
+    await addDoc(collection(db, 'inquiries'), {
+      uid: currentUser?.uid || '',
+      nickname: currentUser?.displayName || '익명',
+      email: currentUser?.email || '',
+      title, content,
+      status: '답변대기',
+      answer: null,
+      date: dateStr,
       createdAt: serverTimestamp()
     });
-
-    ['newProductName','newProductPrice','newProductOrigPrice','newProductEmoji','newProductDesc'].forEach(id => document.getElementById(id).value = '');
-    document.getElementById('newProductBadge').value = '';
-    document.getElementById('newProductImage').value = '';
-    document.getElementById('imagePreview').style.display = 'none';
-    submitBtn.disabled = false;
-    submitBtn.textContent = '상품 등록';
-
-    await loadProducts();
-    switchAdminPage('products');
-    showToast(`'${name}' 상품이 등록됐어요! 📦`, 'success');
+    document.getElementById('inquiryTitle').value = '';
+    document.getElementById('inquiryContent').value = '';
+    document.getElementById('inquiryWriteModal').classList.remove('open');
+    showToast('문의가 접수됐어요! 빠르게 답변드릴게요 😊', 'success');
+    await loadInquiries();
   };
 
-  // ── 관리자: 상품 삭제 ───────────────────────────────────
+  // ── 관리자 문의 답변 ────────────────────────────────────
+  window.answerInquiry = async function(id) {
+    const answer = document.getElementById(`answer_${id}`).value.trim();
+    if (!answer) { showToast('답변 내용을 입력해주세요.'); return; }
+    await updateDoc(doc(db, 'inquiries', id), { answer, status: '답변완료' });
+    await renderAdminInquiries();
+    showToast('답변이 등록됐어요!', 'success');
+  };
+
+  // ── 문의 목록 로드 ──────────────────────────────────────
+  async function loadInquiries() {
+    const snap = await getDocs(query(collection(db, 'inquiries'), orderBy('createdAt', 'desc')));
+    const inquiries = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderInquiryList(inquiries);
+  }
+
+  function renderInquiryList(inquiries) {
+    const el = document.getElementById('inquiryList');
+    if (!el) return;
+    if (!inquiries.length) {
+      el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px;">아직 문의가 없어요.</div>';
+      return;
+    }
+    // 내 문의만 표시 (비관리자)
+    const myInquiries = isAdmin ? inquiries : inquiries.filter(i => i.uid === currentUser?.uid);
+    el.innerHTML = myInquiries.map(i => `
+      <div class="board-item" onclick="viewInquiry('${escapeHtml(i.id)}','${encodeURIComponent(i.title)}','${encodeURIComponent(i.content)}','${encodeURIComponent(i.answer||'')}','${escapeHtml(i.status)}','${escapeHtml(i.nickname)}','${escapeHtml(i.date)}')">
+        <span class="board-num"><span class="status ${i.status==='답변완료'?'status-active':'status-pending'}" style="font-size:9px">${escapeHtml(i.status)}</span></span>
+        <span class="board-title">${escapeHtml(i.title)}</span>
+        <span class="board-author">${escapeHtml(i.nickname)}</span>
+        <span class="board-date">${escapeHtml(i.date)}</span>
+      </div>
+    `).join('') || '<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px;">문의 내역이 없어요.</div>';
+  }
+
+  window.viewInquiry = function(id, title, content, answer, status, nickname, date) {
+    document.getElementById('inquiryViewTitle').textContent = decodeURIComponent(title);
+    document.getElementById('inquiryViewMeta').textContent = `${escapeHtml(nickname)} | ${escapeHtml(date)} | ${escapeHtml(status)}`;
+    document.getElementById('inquiryViewContent').innerHTML = escapeHtml(decodeURIComponent(content)).split('\n').join('<br>');
+    const answerEl = document.getElementById('inquiryViewAnswer');
+    const decoded = decodeURIComponent(answer);
+    if (decoded) {
+      answerEl.innerHTML = `<div style="font-family:'Space Mono',monospace;font-size:10px;color:var(--accent);margin-bottom:6px;letter-spacing:0.1em">GECKO LAB 답변</div>${escapeHtml(decoded).split('\n').join('<br>')}`;
+    } else {
+      answerEl.innerHTML = '<span style="color:var(--text3);font-size:13px">아직 답변이 등록되지 않았어요. 빠르게 답변드릴게요!</span>';
+    }
+    document.getElementById('inquiryViewModal').classList.add('open');
+  };
+
+async function renderAdminInquiries() {
+    const snap = await getDocs(query(collection(db, 'inquiries'), orderBy('createdAt', 'desc')));
+    const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const el = document.getElementById('adminInquiriesList');
+    el.innerHTML = list.map(q => `
+      <div class="review-admin-item">
+        <div class="review-admin-header">
+          <div class="review-avatar">${escapeHtml((q.nickname||'?')[0])}</div>
+          <div>
+            <div class="review-name">${escapeHtml(q.nickname||'익명')}</div>
+            <div class="review-admin-product">${escapeHtml(q.date||'')}</div>
+          </div>
+          <span class="status ${q.answered?'status-active':'status-pending'}" style="margin-left:12px">${q.answered?'답변완료':'미답변'}</span>
+          <div class="review-admin-actions">
+            <button class="review-admin-btn delete" onclick="deleteInquiry('${q.id}')">삭제</button>
+          </div>
+        </div>
+        <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px">${escapeHtml(q.title||'')}</div>
+        <div class="review-body">${escapeHtml(q.content||'')}</div>
+        ${q.answer ? `<div style="margin-top:12px;padding:12px;background:var(--accent-dim);border-radius:4px;border-left:3px solid var(--accent)"><div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:4px">관리자 답변</div><div style="font-size:13px;color:var(--text2)">${escapeHtml(q.answer)}</div></div>` : ''}
+        <div style="margin-top:12px;display:flex;gap:8px">
+          <input class="admin-search" id="answerInput_${q.id}" placeholder="답변 입력..." style="flex:1;padding:8px 12px;font-size:12px" value="${escapeHtml(q.answer||'')}">
+          <button class="admin-btn primary" style="padding:8px 16px;font-size:11px" onclick="submitInquiryAnswer('${q.id}')">답변 등록</button>
+        </div>
+      </div>
+    `).join('') || '<div style="color:var(--text3);font-size:13px;padding:20px">문의가 없어요.</div>';
+  }
+
+  window.deleteInquiry = async function(id) {
+    if (!confirm('이 문의를 삭제하시겠어요?')) return;
+    await deleteDoc(doc(db, 'inquiries', id));
+    renderAdminInquiries();
+    showToast('문의가 삭제됐어요.');
+  };
+
+  window.submitInquiryAnswer = async function(id) {
+    const answer = document.getElementById(`answerInput_${id}`).value.trim();
+    if (!answer) { showToast('답변을 입력해주세요.'); return; }
+    await updateDoc(doc(db, 'inquiries', id), { answer, answered: true });
+    renderAdminInquiries();
+    showToast('답변이 등록됐어요! ✅', 'success');
+  };
+
+
+  window.updateOrderStatus = async function(orderId, status) {
+    await updateDoc(doc(db, 'orders', orderId), { status });
+    showToast(`주문 상태가 "${status}"로 변경됐어요.`, 'success');
+  };
+
+  window.deleteNotice = async function(id) {
+    if (!confirm('이 공지를 삭제하시겠어요?')) return;
+    await deleteDoc(doc(db, 'notices', id));
+    await loadNotices();
+    await renderAdminNotices();
+    showToast('공지가 삭제됐어요.');
+  };
+
+  window.deleteReview = async function(productId, reviewId) {
+    if (!confirm('이 리뷰를 삭제하시겠어요?')) return;
+    await deleteDoc(doc(db, 'products', productId, 'reviews', reviewId));
+    const revSnap = await getDocs(collection(db, 'products', productId, 'reviews'));
+    const revs = revSnap.docs.map(d => d.data());
+    if (revs.length > 0) {
+      const avg = parseFloat((revs.reduce((s,r)=>s+r.stars,0)/revs.length).toFixed(1));
+      await updateDoc(doc(db, 'products', productId), { reviewCount: revs.length, rating: avg });
+    } else {
+      await updateDoc(doc(db, 'products', productId), { reviewCount: 0, rating: 5.0 });
+    }
+    await loadProducts();
+    await renderAdminReviews();
+    showToast('리뷰가 삭제됐어요.');
+  };
+
   window.deleteProduct = async function(id) {
     if (!confirm('이 상품을 삭제하시겠어요?')) return;
     await deleteDoc(doc(db, 'products', id));
@@ -498,138 +588,13 @@
     showToast('상품이 삭제됐어요.');
   };
 
-  // ── 관리자: 공지 삭제 ───────────────────────────────────
-  window.deleteNotice = async function(id) {
-    if (!confirm('이 공지를 삭제하시겠어요?')) return;
-    await deleteDoc(doc(db, 'notices', id));
-    await loadNotices();
-    renderAdminNotices();
-    showToast('공지가 삭제됐어요.');
-  };
-
-  // ── 관리자: 리뷰 삭제 ───────────────────────────────────
-  window.deleteReview = async function(productId, reviewId) {
-    if (!confirm('이 리뷰를 삭제하시겠어요?')) return;
-    await deleteDoc(doc(db, 'products', productId, 'reviews', reviewId));
-    const revSnap = await getDocs(collection(db, 'products', productId, 'reviews'));
-    const revs = revSnap.docs.map(d => d.data());
-    if (revs.length > 0) {
-      const avgRating = parseFloat((revs.reduce((s,r)=>s+r.stars,0)/revs.length).toFixed(1));
-      await updateDoc(doc(db, 'products', productId), { reviewCount: revs.length, rating: avgRating });
-    } else {
-      await updateDoc(doc(db, 'products', productId), { reviewCount: 0, rating: 5.0 });
-    }
-    await loadProducts();
-    renderAdminReviews();
-    showToast('리뷰가 삭제됐어요.');
-  };
-
-  // ── 관리자: 회원 차단/해제 ─────────────────────────────
   window.toggleUserBlock = async function(uid, currentStatus) {
     const newStatus = currentStatus === 'active' ? 'blocked' : 'active';
     await updateDoc(doc(db, 'users', uid), { status: newStatus });
-    renderAdminUsers();
-    showToast(`회원 상태가 변경됐어요.`);
+    await renderAdminUsers();
+    showToast('회원 상태가 변경됐어요.');
   };
 
-  // ── 관리자 페이지 렌더 ─────────────────────────────────
-  async function renderAdminDashboard() {
-    const [usersSnap, productsSnap, noticesSnap] = await Promise.all([
-      getDocs(collection(db, 'users')),
-      getDocs(collection(db, 'products')),
-      getDocs(collection(db, 'notices'))
-    ]);
-    let totalReviews = 0;
-    for (const p of productsSnap.docs) {
-      const revSnap = await getDocs(collection(db, 'products', p.id, 'reviews'));
-      totalReviews += revSnap.size;
-    }
-    document.getElementById('statUsers').textContent = usersSnap.size;
-    document.getElementById('statProducts').textContent = productsSnap.size;
-    document.getElementById('statReviews').textContent = totalReviews;
-    document.getElementById('statNotices').textContent = noticesSnap.size;
-
-    const users = usersSnap.docs.map(d => ({ uid: d.id, ...d.data() })).slice(-5).reverse();
-    document.getElementById('recentUsersTbody').innerHTML = users.map(u => `
-      <tr>
-        <td class="td-name">${u.nickname||'—'}</td>
-        <td class="td-mono">${u.email||'—'}</td>
-        <td class="td-mono">${u.joinDate||'—'}</td>
-        <td><span class="status ${u.status==='active'?'status-active':'status-blocked'}">${u.status==='active'?'활성':'차단'}</span></td>
-      </tr>
-    `).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:20px">가입한 회원이 없어요.</td></tr>';
-  }
-
-  function renderAdminProducts(list) {
-    document.getElementById('adminProductsTbody').innerHTML = (list||products).map(p => `
-      <tr>
-        <td class="td-name">${p.name}</td>
-        <td>${p.categoryLabel}</td>
-        <td class="td-mono">₩${p.price.toLocaleString()}</td>
-        <td class="td-mono">⭐ ${p.rating}</td>
-        <td><span class="status status-active">판매중</span></td>
-        <td><button class="admin-btn danger" style="padding:5px 10px;font-size:10px" onclick="deleteProduct('${p.id}')">삭제</button></td>
-      </tr>
-    `).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:20px">상품이 없어요.</td></tr>';
-  }
-
-  async function renderAdminUsers() {
-    const snap = await getDocs(collection(db, 'users'));
-    const users = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
-    document.getElementById('adminUsersTbody').innerHTML = users.map(u => `
-      <tr>
-        <td class="td-name">${u.nickname||'—'}</td>
-        <td class="td-mono">${u.email||'—'}</td>
-        <td class="td-mono">${u.joinDate||'—'}</td>
-        <td><span class="status status-new">${u.role==='admin'?'관리자':'일반'}</span></td>
-        <td><span class="status ${u.status==='active'?'status-active':'status-blocked'}">${u.status==='active'?'활성':'차단'}</span></td>
-        <td><button class="admin-btn" style="padding:5px 10px;font-size:10px" onclick="toggleUserBlock('${u.uid}','${u.status}')">${u.status==='active'?'차단':'해제'}</button></td>
-      </tr>
-    `).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:20px">가입한 회원이 없어요.</td></tr>';
-  }
-
-  async function renderAdminNotices() {
-    const snap = await getDocs(query(collection(db, 'notices'), orderBy('createdAt', 'desc')));
-    const notices = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    document.getElementById('adminNoticesTbody').innerHTML = notices.map(n => `
-      <tr>
-        <td class="td-name">${n.title}</td>
-        <td class="td-mono">${n.date||'—'}</td>
-        <td><button class="admin-btn danger" style="padding:5px 10px;font-size:10px" onclick="deleteNotice('${n.id}')">삭제</button></td>
-      </tr>
-    `).join('') || '<tr><td colspan="3" style="text-align:center;color:var(--text3);padding:20px">공지가 없어요.</td></tr>';
-  }
-
-  async function renderAdminReviews() {
-    const productsSnap = await getDocs(collection(db, 'products'));
-    let html = '';
-    for (const pd of productsSnap.docs) {
-      const revSnap = await getDocs(query(collection(db, 'products', pd.id, 'reviews'), orderBy('createdAt', 'desc')));
-      revSnap.docs.forEach(rd => {
-        const r = rd.data();
-        html += `
-          <div class="review-admin-item">
-            <div class="review-admin-header">
-              <div class="review-avatar">${(r.nickname||'?')[0]}</div>
-              <div>
-                <div class="review-name">${r.nickname||'익명'}</div>
-                <div class="review-admin-product">${pd.data().name}</div>
-              </div>
-              <div style="margin-left:12px;color:var(--warn)">${'★'.repeat(r.stars)}</div>
-              <div class="review-admin-actions">
-                <button class="review-admin-btn delete" onclick="deleteReview('${pd.id}','${rd.id}')">삭제</button>
-              </div>
-            </div>
-            <div class="review-body">${r.text}</div>
-            <div style="font-size:11px;color:var(--text3);margin-top:6px">${r.date||''}</div>
-          </div>
-        `;
-      });
-    }
-    document.getElementById('adminReviewsList').innerHTML = html || '<div style="color:var(--text3);font-size:13px;padding:20px">아직 리뷰가 없어요.</div>';
-  }
-
-  // ── 관리자 페이지 전환 ─────────────────────────────────
   window.switchAdminPage = async function(page) {
     document.querySelectorAll('.admin-nav-item').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.admin-page').forEach(el => el.classList.remove('active'));
@@ -640,6 +605,10 @@
     else if (page === 'users') await renderAdminUsers();
     else if (page === 'notices') await renderAdminNotices();
     else if (page === 'reviews') await renderAdminReviews();
+    else if (page === 'orders') await renderAdminOrders();
+    else if (page === 'inquiries') await renderAdminInquiries();
+    else if (page === 'orders') await renderAdminOrders();
+    else if (page === 'inquiries') await renderAdminInquiries();
   };
 
   window.openAdmin = async function() {
@@ -650,7 +619,24 @@
   };
 
   // ── 결제 완료 ──────────────────────────────────────────
-  window.completePurchase = function() {
+  window.completePurchase = async function() {
+    if (cart.length === 0) return;
+    const name = document.getElementById('checkoutName').value.trim() || (currentUser?.displayName || '미입력');
+    const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
+    const payBtn = document.querySelector('.pay-btn.active');
+    const payMethod = payBtn ? payBtn.textContent.trim() : '미선택';
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    const orderItems = cart.map(i => ({ id: i.id, name: i.name, price: i.price, qty: i.qty, emoji: i.emoji || '🦎' }));
+    await addDoc(collection(db, 'orders'), {
+      uid: currentUser?.uid || 'guest',
+      nickname: currentUser?.displayName || name,
+      email: currentUser?.email || '',
+      name, payMethod, total, items: orderItems,
+      status: '결제완료',
+      date: dateStr,
+      createdAt: serverTimestamp()
+    });
     cart = []; updateCartUI(); closeCheckout();
     showToast('🎉 주문이 완료되었어요! 감사합니다.', 'success');
   };
@@ -660,8 +646,14 @@
     await seedProductsIfEmpty();
     await loadProducts();
     await loadNotices();
+    if (currentUser) await loadInquiries();
   }
   init();
+
+  // 로그인 상태 변경 시 문의 목록 갱신
+  onAuthStateChanged(auth, async (user) => {
+    if (user) await loadInquiries();
+  });
 
   // ── 전역 함수 연결 ─────────────────────────────────────
   window.showToast = showToast;
@@ -798,6 +790,10 @@
   .star-select{display:flex;gap:6px;margin-bottom:12px}.star-select span{font-size:22px;cursor:pointer;color:var(--text3);transition:color 0.15s}.star-select span.active{color:var(--warn)}
   .review-textarea{width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:2px;font-size:13px;font-family:'Noto Sans KR',sans-serif;resize:vertical;min-height:80px;outline:none;transition:border-color 0.2s}
   .review-textarea:focus{border-color:var(--accent)}
+  .review-footer{margin-top:10px;display:flex;align-items:center;gap:10px}
+  .like-btn{background:none;border:1.5px solid var(--border);color:var(--text3);padding:5px 12px;border-radius:20px;font-size:12px;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;gap:5px}
+  .like-btn:hover,.like-btn.liked{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
+  .like-count{font-weight:700;color:var(--accent)}
   .review-img-upload{margin-top:10px;margin-bottom:10px;border:1.5px dashed var(--border);border-radius:6px;padding:10px 14px;cursor:pointer;font-size:12px;color:var(--text3);transition:all 0.2s;display:flex;flex-direction:column;align-items:flex-start}
   .review-img-upload:hover{border-color:var(--accent);color:var(--accent)}
   .review-submit{margin-top:10px;background:var(--surface2);border:1px solid var(--border);color:var(--text2);padding:9px 20px;font-size:12px;font-family:'Space Mono',monospace;cursor:pointer;border-radius:2px;transition:all 0.2s}
@@ -1061,6 +1057,7 @@
   <a onclick="closeMobileNav();document.getElementById('products').scrollIntoView({behavior:'smooth'})">상품</a>
   <a onclick="closeMobileNav();document.getElementById('noticeSection').scrollIntoView({behavior:'smooth'})">공지사항</a>
   <a onclick="closeMobileNav();document.getElementById('products').scrollIntoView({behavior:'smooth'})">리뷰</a>
+  <a onclick="closeMobileNav();openInquiry()">1:1 문의</a>
 </div>
 
 <!-- HEADER -->
@@ -1073,7 +1070,7 @@
   <nav>
     <a onclick="document.getElementById('products').scrollIntoView({behavior:'smooth'})">상품</a>
     <a onclick="document.getElementById('noticeSection').scrollIntoView({behavior:'smooth'})">공지사항</a>
-    <a onclick="document.getElementById('products').scrollIntoView({behavior:'smooth'})">리뷰</a>
+    <a onclick="document.getElementById('inquirySection').scrollIntoView({behavior:'smooth'})">1대1 문의</a>
   </nav>
   <button class="hamburger" onclick="openMobileNav()">
     <span></span><span></span><span></span>
@@ -1160,6 +1157,45 @@
   </div>
 </section>
 
+<!-- 1대1 문의 섹션 -->
+<section class="notice-section" id="inquirySection">
+  <div class="section-header">
+    <h2 class="section-title">1대1 문의</h2>
+  </div>
+  <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+    <button class="btn-primary" style="font-size:12px;padding:10px 20px" onclick="openInquiryWrite()">✏️ 문의 작성</button>
+  </div>
+  <div class="board-table-wrap">
+    <div class="board-header">
+      <span class="board-header-num">상태</span>
+      <span class="board-header-title">제목</span>
+      <span class="board-header-author">작성자</span>
+      <span class="board-header-date">날짜</span>
+    </div>
+    <div id="inquiryList"><div style="padding:24px;text-align:center;color:var(--text3);font-size:13px;">로그인 후 문의 내역을 확인할 수 있어요.</div></div>
+  </div>
+</section>
+
+<!-- 1대1 문의 모달 -->
+<div class="modal-overlay" id="inquiryModal" onclick="if(event.target===this)closeInquiry()">
+  <div class="notice-modal">
+    <div class="notice-modal-header">
+      <span class="notice-modal-title">1대1 문의</span>
+      <button class="notice-modal-close" onclick="closeInquiry()">✕</button>
+    </div>
+    <div class="notice-modal-body">
+      <label class="form-label" style="display:block;margin-bottom:6px">제목</label>
+      <input class="form-input" id="inquiryTitle" style="width:100%;margin-bottom:16px" placeholder="문의 제목을 입력하세요">
+      <label class="form-label" style="display:block;margin-bottom:6px">내용</label>
+      <textarea class="form-textarea" id="inquiryContent" style="width:100%" rows="5" placeholder="문의 내용을 자세히 입력해주세요"></textarea>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
+        <button class="admin-btn" onclick="closeInquiry()">취소</button>
+        <button class="admin-btn primary" onclick="submitInquiry()">문의 등록</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- FOOTER -->
 <footer>
   <div class="footer-grid">
@@ -1175,9 +1211,9 @@
     </div>
     <div>
       <div class="footer-col-title">고객센터</div>
-      <a class="footer-link">공지사항</a>
-      <a class="footer-link">주문/배송 안내</a>
-      <a class="footer-link">1:1 문의</a>
+      <a class="footer-link" onclick="document.getElementById('noticeSection').scrollIntoView({behavior:'smooth'})">공지사항</a>
+      <a class="footer-link" onclick="document.getElementById('noticeSection').scrollIntoView({behavior:'smooth'})">주문/배송 안내</a>
+      <a class="footer-link" onclick="openInquiry()">1:1 문의</a>
     </div>
   </div>
   <div class="footer-bottom">
@@ -1244,9 +1280,9 @@
       <div class="checkout-label">받으실 분</div>
       <input class="checkout-input" id="checkoutName" placeholder="이름" type="text">
       <div class="checkout-label">연락처</div>
-      <input class="checkout-input" placeholder="010-0000-0000" type="tel">
+      <input class="checkout-input" id="checkoutPhone" placeholder="010-0000-0000" type="tel">
       <div class="checkout-label">배송지</div>
-      <input class="checkout-input" placeholder="주소를 입력하세요" type="text">
+      <input class="checkout-input" id="checkoutAddress" placeholder="주소를 입력하세요" type="text">
       <div class="checkout-label">결제 수단</div>
       <div class="pay-grid">
         <div class="pay-btn active" onclick="selectPay(this)">💳 카드</div>
@@ -1338,6 +1374,44 @@
   </div>
 </div>
 
+<!-- 문의 작성 모달 -->
+<div class="modal-overlay" id="inquiryWriteModal" onclick="if(event.target===this)closeInquiryWrite()">
+  <div class="notice-modal">
+    <div class="notice-modal-header">
+      <span class="notice-modal-title">1대1 문의 작성</span>
+      <button class="notice-modal-close" onclick="closeInquiryWrite()">✕</button>
+    </div>
+    <div class="notice-modal-body">
+      <label class="form-label" style="display:block;margin-bottom:6px">제목</label>
+      <input class="form-input" id="inquiryTitle" style="width:100%;margin-bottom:16px" placeholder="문의 제목을 입력하세요">
+      <label class="form-label" style="display:block;margin-bottom:6px">내용</label>
+      <textarea class="form-textarea" id="inquiryContent" style="width:100%" rows="6" placeholder="문의 내용을 자세히 입력해주세요"></textarea>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
+        <button class="admin-btn" onclick="closeInquiryWrite()">취소</button>
+        <button class="admin-btn primary" onclick="submitInquiry()">문의 등록</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 문의 상세 모달 -->
+<div class="modal-overlay" id="inquiryViewModal" onclick="if(event.target===this)closeInquiryView()">
+  <div class="notice-view-modal">
+    <div class="notice-view-header">
+      <div class="notice-view-title" id="inquiryViewTitle">—</div>
+      <div class="notice-view-meta" id="inquiryViewMeta">—</div>
+    </div>
+    <div class="notice-view-body" id="inquiryViewContent">—</div>
+    <div style="padding:0 28px;margin-bottom:16px">
+      <div style="font-family:'Space Mono',monospace;font-size:10px;color:var(--text3);letter-spacing:0.1em;margin-bottom:8px">답변</div>
+      <div id="inquiryViewAnswer" style="padding:14px;background:var(--bg2);border-radius:4px;font-size:13px;color:var(--text2);line-height:1.7"></div>
+    </div>
+    <div style="padding:0 28px 28px;display:flex;justify-content:flex-end">
+      <button class="btn-secondary" onclick="closeInquiryView()" style="padding:10px 24px">닫기</button>
+    </div>
+  </div>
+</div>
+
 <!-- ADMIN -->
 <div class="admin-panel" id="adminPanel">
   <div class="admin-topbar">
@@ -1357,6 +1431,12 @@
       <div class="admin-nav-label">게시판</div>
       <div class="admin-nav-item" onclick="switchAdminPage('notices')"><span class="admin-nav-icon">📢</span> 공지사항</div>
       <div class="admin-nav-item" onclick="switchAdminPage('reviews')"><span class="admin-nav-icon">⭐</span> 리뷰 관리</div>
+      <div class="admin-nav-label">주문/문의</div>
+      <div class="admin-nav-item" onclick="switchAdminPage('orders')"><span class="admin-nav-icon">🛍</span> 주문 목록</div>
+      <div class="admin-nav-item" onclick="switchAdminPage('inquiries')"><span class="admin-nav-icon">💬</span> 1대1 문의</div>
+      <div class="admin-nav-label">주문/문의</div>
+      <div class="admin-nav-item" onclick="switchAdminPage('orders')"><span class="admin-nav-icon">🛍</span> 주문 목록</div>
+      <div class="admin-nav-item" onclick="switchAdminPage('inquiries')"><span class="admin-nav-icon">💬</span> 1대1 문의</div>
     </div>
     <div class="admin-main">
       <div class="admin-page active" id="admin-dashboard">
@@ -1365,8 +1445,8 @@
         <div class="admin-stats">
           <div class="stat-card"><div class="stat-label">총 회원수</div><div class="stat-value" id="statUsers">—</div><div class="stat-sub">등록된 회원</div></div>
           <div class="stat-card"><div class="stat-label">상품 수</div><div class="stat-value" id="statProducts">—</div><div class="stat-sub">등록된 상품</div></div>
-          <div class="stat-card"><div class="stat-label">리뷰 수</div><div class="stat-value" id="statReviews">—</div><div class="stat-sub">전체 리뷰</div></div>
-          <div class="stat-card"><div class="stat-label">공지사항</div><div class="stat-value" id="statNotices">—</div><div class="stat-sub">게시된 공지</div></div>
+          <div class="stat-card"><div class="stat-label">총 주문수</div><div class="stat-value" id="statOrders">—</div><div class="stat-sub">전체 주문</div></div>
+          <div class="stat-card"><div class="stat-label">미답변 문의</div><div class="stat-value" id="statInquiries">—</div><div class="stat-sub">답변 대기중</div></div>
         </div>
         <div style="font-family:'Space Mono',monospace;font-size:11px;color:var(--text3);margin-bottom:12px;letter-spacing:0.1em">최근 가입 회원</div>
         <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>닉네임</th><th>이메일</th><th>가입일</th><th>상태</th></tr></thead><tbody id="recentUsersTbody"></tbody></table></div>
@@ -1428,6 +1508,40 @@
         <div class="admin-page-sub">고객 리뷰를 관리합니다</div>
         <div id="adminReviewsList"></div>
       </div>
+      <div class="admin-page" id="admin-orders">
+        <div class="admin-page-title">주문 목록</div>
+        <div class="admin-page-sub">접수된 주문을 관리합니다</div>
+        <div class="admin-table-wrap" style="overflow-x:auto">
+          <table class="admin-table">
+            <thead><tr><th>주문일시</th><th>주문자</th><th>상품</th><th>금액</th><th>결제수단</th><th>상태</th><th>배송정보</th></tr></thead>
+            <tbody id="adminOrdersTbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="admin-page" id="admin-inquiries">
+        <div class="admin-page-title">1대1 문의</div>
+        <div class="admin-page-sub">고객 문의에 답변합니다</div>
+        <div id="adminInquiriesList"></div>
+      </div>
+
+      <!-- 주문 목록 -->
+      <div class="admin-page" id="admin-orders">
+        <div class="admin-page-title">주문 목록</div>
+        <div class="admin-page-sub">고객 주문을 관리합니다</div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr><th>주문일시</th><th>주문자</th><th>상품</th><th>결제수단</th><th>금액</th><th>상태</th><th>관리</th></tr></thead>
+            <tbody id="adminOrdersTbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 1대1 문의 -->
+      <div class="admin-page" id="admin-inquiries">
+        <div class="admin-page-title">1대1 문의</div>
+        <div class="admin-page-sub">고객 문의를 관리합니다</div>
+        <div id="adminInquiriesList"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -1479,6 +1593,52 @@
   function closeNoticeWrite() { document.getElementById('noticeWriteModal').classList.remove('open'); }
 
   function closeAdmin() { document.getElementById('adminPanel').classList.remove('open'); }
+
+  function openInquiry() {
+    if (!currentUser) { openAuth(); showToast('로그인 후 문의 가능해요.'); return; }
+    document.getElementById('inquiryTitle').value = '';
+    document.getElementById('inquiryContent').value = '';
+    document.getElementById('inquiryModal').classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeInquiry() {
+    document.getElementById('inquiryModal').classList.remove('open');
+    document.body.style.overflow = '';
+  }
+
+  function openInquiryWrite() {
+    if (!currentUser) { openAuth(); return; }
+    document.getElementById('inquiryTitle').value = '';
+    document.getElementById('inquiryContent').value = '';
+    document.getElementById('inquiryWriteModal').classList.add('open');
+  }
+  function closeInquiryWrite() { document.getElementById('inquiryWriteModal').classList.remove('open'); }
+  function closeInquiryView() { document.getElementById('inquiryViewModal').classList.remove('open'); }
+
+  // XSS 방어 함수
+  function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.appendChild(document.createTextNode(String(str)));
+    return div.innerHTML;
+  }
+
+  window.toggleReviewLike = async function(productId, reviewId) {
+    if (!currentUser) { openAuth(); showToast('로그인 후 이용해주세요.'); return; }
+    if (!productId || !reviewId) return;
+    const reviewRef = doc(db, 'products', productId, 'reviews', reviewId);
+    const snap = await getDoc(reviewRef);
+    if (!snap.exists()) return;
+    const likedBy = snap.data().likedBy || [];
+    const uid = currentUser.uid;
+    if (likedBy.includes(uid)) {
+      await updateDoc(reviewRef, { likedBy: likedBy.filter(id => id !== uid) });
+    } else {
+      await updateDoc(reviewRef, { likedBy: [...likedBy, uid] });
+    }
+    // 리뷰 새로고침
+    await openProduct(productId);
+  };
 
   window.previewReviewImage = function(input) {
     if (input.files && input.files[0]) {
