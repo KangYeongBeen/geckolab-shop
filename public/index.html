@@ -4,13 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GECKO LAB — 파충류 용품 전문점</title>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Noto+Sans+KR:wght@300;400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800;900&family=Noto+Sans+KR:wght@300;400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 
 <!-- Firebase SDK -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, updateProfile } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
   import { getFirestore, collection, doc, setDoc, getDoc, getDocs, addDoc, deleteDoc, updateDoc, onSnapshot, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+  import { getStorage, ref, uploadBytesResumable, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyDbqerIemczisX0bSG11OAQMiKEaUQmw4I",
@@ -26,6 +27,7 @@
   const auth = getAuth(app);
   const db = getFirestore(app);
   const googleProvider = new GoogleAuthProvider();
+  const storage = getStorage(app);
 
   // 관리자 이메일
   const ADMIN_EMAIL = "admin@geckolab.kr";
@@ -193,7 +195,9 @@
     grid.innerHTML = list.map(p => `
       <div class="product-card" onclick="openProduct('${p.id}')">
         <div class="product-img-wrap">
-          <div class="product-emoji">${p.emoji || '🦎'}</div>
+          ${p.imageUrl
+            ? `<img src="${p.imageUrl}" alt="${p.name}" style="width:100%;height:100%;object-fit:cover;">`
+            : `<div class="product-emoji">${p.emoji || '🦎'}</div>`}
           ${p.badge ? `<span class="product-badge ${p.badgeClass || 'badge-new'}">${p.badge}</span>` : ''}
           <button class="quick-add" onclick="event.stopPropagation(); quickAdd('${p.id}')">+ 빠른 추가</button>
         </div>
@@ -243,7 +247,9 @@
     document.getElementById('modalDesc').textContent = p.desc;
     document.getElementById('modalPrice').textContent = `₩${p.price.toLocaleString()}`;
     document.getElementById('modalOrig').textContent = p.origPrice ? `₩${p.origPrice.toLocaleString()}` : '';
-    document.getElementById('modalImgSection').innerHTML = `<span style="font-size:120px">${p.emoji || '🦎'}</span>`;
+    document.getElementById('modalImgSection').innerHTML = p.imageUrl
+      ? `<img src="${p.imageUrl}" alt="${p.name}" style="width:100%;height:100%;object-fit:cover;">`
+      : `<span style="font-size:120px">${p.emoji || '🦎'}</span>`;
 
     // 리뷰 로드
     const revSnap = await getDocs(query(collection(db, 'products', id, 'reviews'), orderBy('createdAt', 'desc')));
@@ -263,6 +269,7 @@
               <div class="review-stars">${'★'.repeat(r.stars)}</div>
             </div>
             <div class="review-body">${r.text}</div>
+            ${r.reviewImageUrl ? `<img src="${r.reviewImageUrl}" alt="리뷰 이미지" style="max-width:100%;max-height:200px;object-fit:contain;border-radius:6px;margin-top:10px;cursor:pointer;" onclick="window.open('${r.reviewImageUrl}','_blank')">` : ''}
           </div>
         `).join('')}
     `;
@@ -277,6 +284,11 @@
             ${[1,2,3,4,5].map(n => `<span onclick="setReviewStar(${n})" class="active" data-star="${n}">★</span>`).join('')}
           </div>
           <textarea class="review-textarea" id="reviewText" placeholder="상품에 대한 솔직한 리뷰를 남겨주세요."></textarea>
+          <div class="review-img-upload" onclick="document.getElementById('reviewImageInput').click()">
+            <span id="reviewImgLabel">📷 사진 첨부 (선택)</span>
+            <img id="reviewImgPreview" style="display:none;max-height:120px;max-width:100%;border-radius:6px;margin-top:8px;object-fit:contain;">
+          </div>
+          <input type="file" id="reviewImageInput" accept="image/*" style="display:none" onchange="previewReviewImage(this)">
           <button class="review-submit" onclick="submitReview('${id}')">리뷰 등록</button>
         </div>
       `;
@@ -298,13 +310,31 @@
   window.submitReview = async function(productId) {
     const text = document.getElementById('reviewText').value.trim();
     if (!text) { showToast('리뷰 내용을 입력해주세요.'); return; }
+
+    const submitBtn = document.querySelector('.review-submit');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '등록 중...'; }
+
     const now = new Date();
     const dateStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`;
+
+    let reviewImageUrl = null;
+    const imageFile = document.getElementById('reviewImageInput')?.files[0];
+    if (imageFile) {
+      try {
+        const storageRef = ref(storage, `reviews/${Date.now()}_${imageFile.name}`);
+        const uploadTask = await uploadBytesResumable(storageRef, imageFile);
+        reviewImageUrl = await getDownloadURL(uploadTask.ref);
+      } catch(e) {
+        showToast('이미지 업로드 실패', 'error');
+      }
+    }
+
     await addDoc(collection(db, 'products', productId, 'reviews'), {
       nickname: currentUser.displayName || '익명',
       uid: currentUser.uid,
       stars: selectedReviewStars,
       text, date: dateStr,
+      reviewImageUrl,
       createdAt: serverTimestamp()
     });
     // 리뷰 카운트 업데이트
@@ -402,7 +432,7 @@
     showToast('공지사항이 등록됐어요! 📢', 'success');
   };
 
-  // ── 관리자: 상품 등록 ───────────────────────────────────
+  // ── 관리자: 상품 등록 (이미지 업로드 포함) ──────────────
   window.submitNewProduct = async function() {
     const name = document.getElementById('newProductName').value.trim();
     const category = document.getElementById('newProductCategory').value;
@@ -412,17 +442,48 @@
     const badge = document.getElementById('newProductBadge').value || null;
     const emoji = document.getElementById('newProductEmoji').value || '🦎';
     const desc = document.getElementById('newProductDesc').value.trim();
+    const imageFile = document.getElementById('newProductImage').files[0];
+
     if (!name || !price || !desc) { showToast('필수 항목을 입력해주세요.'); return; }
+
     const categoryLabels = { habitat: '사육환경', feeding: '먹이/영양제', accessory: '악세서리' };
     const badgeClasses = { NEW: 'badge-new', BEST: 'badge-best', SALE: 'badge-sale' };
+
+    const submitBtn = document.getElementById('productSubmitBtn');
+    submitBtn.disabled = true;
+    submitBtn.textContent = '등록 중...';
+
+    let imageUrl = null;
+
+    // 이미지 있으면 Storage 업로드
+    if (imageFile) {
+      try {
+        const storageRef = ref(storage, `products/${Date.now()}_${imageFile.name}`);
+        const uploadTask = await uploadBytesResumable(storageRef, imageFile);
+        imageUrl = await getDownloadURL(uploadTask.ref);
+      } catch (e) {
+        showToast('이미지 업로드 실패: ' + e.message, 'error');
+        submitBtn.disabled = false;
+        submitBtn.textContent = '상품 등록';
+        return;
+      }
+    }
+
     await addDoc(collection(db, 'products'), {
       name, category, categoryLabel: categoryLabels[category],
       badge, badgeClass: badge ? badgeClasses[badge] : null,
-      price, origPrice, emoji, rating: 5.0, reviewCount: 0, desc,
+      price, origPrice, emoji, imageUrl,
+      rating: 5.0, reviewCount: 0, desc,
       createdAt: serverTimestamp()
     });
+
     ['newProductName','newProductPrice','newProductOrigPrice','newProductEmoji','newProductDesc'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('newProductBadge').value = '';
+    document.getElementById('newProductImage').value = '';
+    document.getElementById('imagePreview').style.display = 'none';
+    submitBtn.disabled = false;
+    submitBtn.textContent = '상품 등록';
+
     await loadProducts();
     switchAdminPage('products');
     showToast(`'${name}' 상품이 등록됐어요! 📦`, 'success');
@@ -615,22 +676,23 @@
 
 <style>
   :root {
-    --bg:#080c14;--bg2:#0d1220;--bg3:#111828;--surface:#151d2e;--surface2:#1a2438;
-    --border:#1e2d45;--accent:#c9956a;--accent2:#e8b48a;--accent-dim:rgba(201,149,106,0.12);
-    --text:#f0ede8;--text2:#9aa0b0;--text3:#4a5568;--danger:#e05a3a;--warn:#d4a843;--success:#4caf7d;
+    --bg:#f8faf8;--bg2:#f0f4f0;--bg3:#e8f0e8;--surface:#ffffff;--surface2:#f4f8f4;
+    --border:#c8dcc8;--accent:#2d6a4f;--accent2:#40916c;--accent-dim:rgba(45,106,79,0.10);
+    --text:#1b3a2d;--text2:#4a7c59;--text3:#8aab8a;--danger:#e05a3a;--warn:#d4a843;--success:#2d6a4f;
+    --gold:#2d6a4f;--gold2:#40916c;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html{scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Noto Sans KR',sans-serif;font-weight:300;min-height:100vh}
+  body{background:var(--bg);color:var(--text);font-family:'Nunito','Noto Sans KR',sans-serif;font-weight:400;min-height:100vh}
   @keyframes fadeIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
   @keyframes ticker{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
-  ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--accent);border-radius:2px}
+  ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:var(--bg2)}::-webkit-scrollbar-thumb{background:var(--accent);border-radius:2px}
 
   /* HEADER */
-  header{position:sticky;top:0;z-index:100;background:rgba(13,15,10,0.92);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);padding:0 32px;height:64px;display:flex;align-items:center;justify-content:space-between}
-  .logo{display:flex;align-items:baseline;gap:10px;cursor:pointer}
-  .logo-text{font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:0.08em;color:var(--accent);line-height:1}
-  .logo-sub{font-family:'Space Mono',monospace;font-size:10px;color:var(--text3);letter-spacing:0.15em;text-transform:uppercase}
+  header{position:sticky;top:0;z-index:100;background:rgba(248,250,248,0.95);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);box-shadow:0 1px 8px rgba(45,106,79,0.08);padding:0 32px;height:64px;display:flex;align-items:center;justify-content:space-between}
+  .logo{display:flex;align-items:baseline;gap:8px;cursor:pointer;text-decoration:none}
+  .logo-text{font-family:'Nunito',sans-serif;font-size:22px;font-weight:900;letter-spacing:0.04em;color:var(--accent);line-height:1.1}
+  .logo-sub{font-family:'Space Mono',monospace;font-size:9px;color:var(--text3);letter-spacing:0.12em;text-transform:uppercase}
   nav{display:flex;gap:28px;align-items:center}
   nav a{color:var(--text2);text-decoration:none;font-size:13px;letter-spacing:0.05em;transition:color 0.2s;cursor:pointer}
   nav a:hover{color:var(--accent)}
@@ -655,12 +717,12 @@
 
   /* HERO */
   .hero{height:520px;position:relative;overflow:hidden;display:flex;align-items:center;border-bottom:1px solid var(--border)}
-  .hero-bg{position:absolute;inset:0;background:radial-gradient(ellipse 60% 80% at 70% 50%,rgba(201,149,106,0.10) 0%,transparent 60%),radial-gradient(ellipse 40% 60% at 20% 80%,rgba(201,149,106,0.05) 0%,transparent 50%),linear-gradient(135deg,var(--bg) 0%,var(--bg3) 100%)}
-  .hero-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(201,149,106,0.08) 1px,transparent 1px),linear-gradient(90deg,rgba(201,149,106,0.08) 1px,transparent 1px);background-size:48px 48px;opacity:0.3;mask-image:radial-gradient(ellipse at 70% 50%,black 20%,transparent 70%)}
+  .hero-bg{position:absolute;inset:0;background:radial-gradient(ellipse 60% 80% at 70% 50%,rgba(45,106,79,0.15) 0%,transparent 60%),radial-gradient(ellipse 40% 60% at 20% 80%,rgba(64,145,108,0.10) 0%,transparent 50%),linear-gradient(135deg,#e8f5e9 0%,#f1f8f1 100%)}
+  .hero-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(45,106,79,0.10) 1px,transparent 1px),linear-gradient(90deg,rgba(45,106,79,0.10) 1px,transparent 1px);background-size:48px 48px;opacity:0.3;mask-image:radial-gradient(ellipse at 70% 50%,black 20%,transparent 70%)}
   .hero-content{position:relative;z-index:2;padding:0 64px;max-width:640px}
   .hero-eyebrow{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:0.2em;color:var(--accent);text-transform:uppercase;margin-bottom:16px;display:flex;align-items:center;gap:12px}
   .hero-eyebrow::before{content:'';display:block;width:32px;height:1px;background:var(--accent)}
-  .hero-title{font-family:'Bebas Neue',sans-serif;font-size:clamp(56px,8vw,96px);line-height:0.92;letter-spacing:0.02em;color:var(--text);margin-bottom:24px}
+  .hero-title{font-family:'Nunito',sans-serif;font-size:clamp(52px,7.5vw,88px);font-weight:900;line-height:0.92;letter-spacing:0.02em;color:var(--text);margin-bottom:24px;text-shadow:0 2px 8px rgba(45,106,79,0.1)}
   .hero-title span{color:var(--accent)}
   .hero-desc{font-size:15px;line-height:1.7;color:var(--text2);margin-bottom:36px;max-width:440px}
   .hero-cta{display:flex;gap:14px;align-items:center}
@@ -670,15 +732,15 @@
   .btn-secondary:hover{border-color:var(--accent);color:var(--accent)}
 
   /* TICKER */
-  .ticker-wrap{border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--bg2);overflow:hidden;height:36px;display:flex;align-items:center}
+  .ticker-wrap{border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--accent);overflow:hidden;height:36px;display:flex;align-items:center}
   .ticker{display:flex;animation:ticker 30s linear infinite;white-space:nowrap}
-  .ticker-item{font-family:'Space Mono',monospace;font-size:11px;color:var(--text3);padding:0 32px;letter-spacing:0.1em}
-  .ticker-item span{color:var(--accent)}
+  .ticker-item{font-family:'Space Mono',monospace;font-size:11px;color:rgba(255,255,255,0.85);padding:0 32px;letter-spacing:0.1em}
+  .ticker-item span{color:#ffffff;font-weight:700}
 
   /* PRODUCTS */
   .section{padding:80px 64px}
   .section-header{display:flex;align-items:baseline;gap:16px;margin-bottom:40px}
-  .section-title{font-family:'Bebas Neue',sans-serif;font-size:36px;letter-spacing:0.05em;color:var(--text)}
+  .section-title{font-family:'Nunito',sans-serif;font-size:32px;font-weight:900;letter-spacing:0.02em;color:var(--text)}
   .section-count{font-family:'Space Mono',monospace;font-size:11px;color:var(--text3)}
   .filter-bar{display:flex;gap:8px;margin-bottom:32px;align-items:center;flex-wrap:wrap}
   .filter-btn{background:transparent;border:1px solid var(--border);color:var(--text3);padding:7px 18px;font-size:12px;font-family:'Space Mono',monospace;cursor:pointer;border-radius:2px;transition:all 0.2s;letter-spacing:0.05em}
@@ -686,7 +748,7 @@
   .sort-select{margin-left:auto;background:var(--surface);border:1px solid var(--border);color:var(--text2);padding:7px 12px;font-size:12px;font-family:'Space Mono',monospace;border-radius:2px;cursor:pointer;outline:none}
   .product-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:24px}
   .product-card{background:var(--surface);border:1px solid var(--border);border-radius:4px;overflow:hidden;cursor:pointer;transition:all 0.3s}
-  .product-card:hover{border-color:var(--accent);transform:translateY(-4px);box-shadow:0 12px 40px rgba(0,0,0,0.3)}
+  .product-card:hover{border-color:var(--accent);transform:translateY(-4px);box-shadow:0 12px 40px rgba(45,106,79,0.15)}
   .product-img-wrap{position:relative;aspect-ratio:1;overflow:hidden;background:var(--bg3);display:flex;align-items:center;justify-content:center}
   .product-emoji{font-size:80px;opacity:0.8}
   .product-badge{position:absolute;top:12px;left:12px;font-family:'Space Mono',monospace;font-size:10px;letter-spacing:0.1em;padding:4px 10px;border-radius:2px;font-weight:700}
@@ -736,16 +798,18 @@
   .star-select{display:flex;gap:6px;margin-bottom:12px}.star-select span{font-size:22px;cursor:pointer;color:var(--text3);transition:color 0.15s}.star-select span.active{color:var(--warn)}
   .review-textarea{width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:2px;font-size:13px;font-family:'Noto Sans KR',sans-serif;resize:vertical;min-height:80px;outline:none;transition:border-color 0.2s}
   .review-textarea:focus{border-color:var(--accent)}
+  .review-img-upload{margin-top:10px;margin-bottom:10px;border:1.5px dashed var(--border);border-radius:6px;padding:10px 14px;cursor:pointer;font-size:12px;color:var(--text3);transition:all 0.2s;display:flex;flex-direction:column;align-items:flex-start}
+  .review-img-upload:hover{border-color:var(--accent);color:var(--accent)}
   .review-submit{margin-top:10px;background:var(--surface2);border:1px solid var(--border);color:var(--text2);padding:9px 20px;font-size:12px;font-family:'Space Mono',monospace;cursor:pointer;border-radius:2px;transition:all 0.2s}
   .review-submit:hover{border-color:var(--accent);color:var(--accent)}
 
   /* CART */
   .cart-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:200;display:none}
   .cart-backdrop.open{display:block}
-  .cart-panel{position:fixed;right:0;top:0;bottom:0;width:380px;background:var(--surface);border-left:1px solid var(--border);z-index:201;display:flex;flex-direction:column;transform:translateX(100%);transition:transform 0.3s ease}
+  .cart-panel{position:fixed;right:0;top:0;bottom:0;width:380px;background:var(--surface);border-left:1px solid var(--border);box-shadow:-4px 0 20px rgba(45,106,79,0.08);z-index:201;display:flex;flex-direction:column;transform:translateX(100%);transition:transform 0.3s ease}
   .cart-panel.open{transform:translateX(0)}
   .cart-header{padding:24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
-  .cart-title{font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:0.08em;color:var(--text)}
+  .cart-title{font-family:'Nunito',sans-serif;font-size:20px;font-weight:800;letter-spacing:0.02em;color:var(--text)}
   .cart-close{background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer}
   .cart-items{flex:1;overflow-y:auto;padding:16px}
   .cart-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:200px;color:var(--text3);font-size:13px;gap:12px}
@@ -763,7 +827,7 @@
   /* CHECKOUT */
   .checkout-modal{background:var(--surface);border:1px solid var(--border);border-radius:6px;max-width:500px;width:95%;max-height:90vh;overflow-y:auto;animation:fadeIn 0.2s}
   .checkout-header{padding:28px 28px 0;display:flex;justify-content:space-between;align-items:center}
-  .checkout-title{font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:0.06em}
+  .checkout-title{font-family:'Nunito',sans-serif;font-size:22px;font-weight:800;letter-spacing:0.02em}
   .checkout-body{padding:28px}
   .checkout-label{font-size:11px;color:var(--text3);letter-spacing:0.1em;margin-bottom:8px;font-family:'Space Mono',monospace}
   .checkout-input{width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:11px 14px;border-radius:2px;font-size:13px;font-family:'Noto Sans KR',sans-serif;outline:none;transition:border-color 0.2s;margin-bottom:16px}
@@ -778,7 +842,7 @@
   /* AUTH */
   .auth-modal{background:var(--surface);border:1px solid var(--border);border-radius:6px;max-width:440px;width:95%;animation:fadeIn 0.2s}
   .auth-header{padding:32px 32px 0;text-align:center}
-  .auth-logo{font-family:'Bebas Neue',sans-serif;font-size:32px;color:var(--accent);letter-spacing:0.1em;margin-bottom:6px}
+  .auth-logo{font-family:'Nunito',sans-serif;font-size:28px;font-weight:900;color:var(--accent);letter-spacing:0.04em;margin-bottom:6px}
   .auth-tabs{display:flex;border-bottom:1px solid var(--border);margin-top:24px}
   .auth-tab{flex:1;padding:14px;text-align:center;cursor:pointer;font-size:13px;color:var(--text3);border-bottom:2px solid transparent;transition:all 0.2s;font-family:'Space Mono',monospace;letter-spacing:0.08em}
   .auth-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
@@ -821,20 +885,20 @@
   /* NOTICE WRITE */
   .notice-modal{background:var(--surface);border:1px solid var(--border);border-radius:6px;max-width:560px;width:95%;animation:fadeIn 0.2s}
   .notice-modal-header{padding:24px 28px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
-  .notice-modal-title{font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:0.06em;color:var(--text)}
+  .notice-modal-title{font-family:'Nunito',sans-serif;font-size:20px;font-weight:800;letter-spacing:0.02em;color:var(--text)}
   .notice-modal-close{background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer}
   .notice-modal-body{padding:28px}
 
   /* ADMIN */
   .admin-panel{position:fixed;inset:0;background:var(--bg);z-index:500;display:none;flex-direction:column;overflow:hidden}
   .admin-panel.open{display:flex}
-  .admin-topbar{height:56px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 24px;gap:16px;flex-shrink:0}
-  .admin-topbar-title{font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--accent);letter-spacing:0.08em}
-  .admin-topbar-badge{font-family:'Space Mono',monospace;font-size:10px;background:var(--accent);color:var(--bg);padding:3px 8px;border-radius:2px;font-weight:700}
-  .admin-close{margin-left:auto;background:none;border:1px solid var(--border);color:var(--text2);padding:7px 16px;border-radius:2px;font-family:'Space Mono',monospace;font-size:11px;cursor:pointer;transition:all 0.2s}
+  .admin-topbar{height:56px;background:var(--accent);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 24px;gap:16px;flex-shrink:0}
+  .admin-topbar-title{font-family:'Nunito',sans-serif;font-size:20px;font-weight:900;color:#ffffff;letter-spacing:0.02em}
+  .admin-topbar-badge{font-family:'Space Mono',monospace;font-size:10px;background:rgba(255,255,255,0.2);color:#ffffff;padding:3px 8px;border-radius:2px;font-weight:700}
+  .admin-close{margin-left:auto;background:none;border:1px solid rgba(255,255,255,0.3);color:rgba(255,255,255,0.8);padding:7px 16px;border-radius:2px;font-family:'Space Mono',monospace;font-size:11px;cursor:pointer;transition:all 0.2s}
   .admin-close:hover{border-color:var(--danger);color:var(--danger)}
   .admin-layout{display:flex;flex:1;overflow:hidden}
-  .admin-sidebar{width:220px;background:var(--surface);border-right:1px solid var(--border);padding:20px 0;flex-shrink:0;overflow-y:auto}
+  .admin-sidebar{width:220px;background:var(--bg2);border-right:1px solid var(--border);padding:20px 0;flex-shrink:0;overflow-y:auto}
   .admin-nav-label{font-family:'Space Mono',monospace;font-size:10px;color:var(--text3);letter-spacing:0.15em;padding:0 20px;margin-bottom:8px;margin-top:16px}
   .admin-nav-label:first-child{margin-top:0}
   .admin-nav-item{display:flex;align-items:center;gap:10px;padding:11px 20px;color:var(--text2);cursor:pointer;transition:all 0.15s;font-size:13px;border-left:2px solid transparent}
@@ -843,12 +907,12 @@
   .admin-nav-icon{font-size:15px;width:20px;text-align:center}
   .admin-main{flex:1;overflow-y:auto;padding:32px}
   .admin-page{display:none}.admin-page.active{display:block;animation:fadeIn 0.2s}
-  .admin-page-title{font-family:'Bebas Neue',sans-serif;font-size:30px;letter-spacing:0.05em;color:var(--text);margin-bottom:4px}
+  .admin-page-title{font-family:'Nunito',sans-serif;font-size:26px;font-weight:900;letter-spacing:0.02em;color:var(--text);margin-bottom:4px}
   .admin-page-sub{font-size:12px;color:var(--text3);margin-bottom:28px}
   .admin-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:32px}
   .stat-card{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:20px}
   .stat-label{font-size:11px;color:var(--text3);margin-bottom:8px;font-family:'Space Mono',monospace}
-  .stat-value{font-family:'Bebas Neue',sans-serif;font-size:32px;color:var(--accent);letter-spacing:0.05em}
+  .stat-value{font-family:'Nunito',sans-serif;font-size:30px;font-weight:900;color:var(--accent);letter-spacing:0.02em}
   .stat-sub{font-size:11px;color:var(--text3);margin-top:4px}
   .admin-table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:4px;overflow:hidden}
   .admin-table{width:100%;border-collapse:collapse}
@@ -881,27 +945,32 @@
   .review-admin-btn.delete{border-color:var(--danger);color:var(--danger)}.review-admin-btn.delete:hover{background:rgba(224,90,58,0.15)}
 
   /* FOOTER */
-  footer{background:var(--bg2);border-top:1px solid var(--border);padding:48px 64px;margin-top:80px}
+  footer{background:var(--accent);border-top:1px solid var(--border);padding:48px 64px;margin-top:80px}
   .footer-grid{display:grid;grid-template-columns:2fr 1fr 1fr;gap:48px;margin-bottom:40px}
-  .footer-brand{font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--accent);letter-spacing:0.08em;margin-bottom:12px}
-  .footer-desc{font-size:13px;color:var(--text3);line-height:1.7;max-width:320px}
-  .footer-col-title{font-family:'Space Mono',monospace;font-size:11px;color:var(--text);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:16px}
-  .footer-link{display:block;font-size:13px;color:var(--text3);text-decoration:none;margin-bottom:8px;transition:color 0.2s;cursor:pointer}
-  .footer-link:hover{color:var(--accent)}
-  .footer-bottom{border-top:1px solid var(--border);padding-top:24px;display:flex;justify-content:space-between;align-items:center}
-  .footer-copy{font-size:12px;color:var(--text3)}.footer-mono{font-family:'Space Mono',monospace;font-size:10px;color:var(--text3)}
+  .footer-brand{font-family:'Nunito',sans-serif;font-size:26px;font-weight:900;color:#ffffff;letter-spacing:0.04em;margin-bottom:12px}
+  .footer-desc{font-size:13px;color:rgba(255,255,255,0.7);line-height:1.7;max-width:320px}
+  .footer-col-title{font-family:'Space Mono',monospace;font-size:11px;color:rgba(255,255,255,0.9);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:16px}
+  .footer-link{display:block;font-size:13px;color:rgba(255,255,255,0.65);text-decoration:none;margin-bottom:8px;transition:color 0.2s;cursor:pointer}
+  .footer-link:hover{color:#ffffff}
+  .footer-bottom{border-top:1px solid rgba(255,255,255,0.2);padding-top:24px;display:flex;justify-content:space-between;align-items:center}
+  .footer-copy{font-size:12px;color:rgba(255,255,255,0.6)}.footer-mono{font-family:'Space Mono',monospace;font-size:10px;color:rgba(255,255,255,0.5)}
 
   /* TOAST */
   .toast{position:fixed;bottom:32px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:12px 24px;border-radius:4px;font-size:13px;z-index:1000;opacity:0;transition:all 0.3s;pointer-events:none;white-space:nowrap}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   .toast.success{border-color:var(--success);color:var(--success)}.toast.error{border-color:var(--danger);color:var(--danger)}
 
+  /* 이미지 업로드 */
+  .image-upload-wrap{border:2px dashed var(--border);border-radius:4px;padding:20px;text-align:center;cursor:pointer;transition:all 0.2s;min-height:120px;display:flex;align-items:center;justify-content:center;flex-direction:column}
+  .image-upload-wrap.drag-over{border-color:var(--accent);background:var(--accent-dim);transform:scale(1.01)}
+  .image-upload-wrap:hover{border-color:var(--accent);background:var(--accent-dim)}
+
   /* 햄버거 메뉴 */
   .hamburger{display:none;flex-direction:column;gap:5px;cursor:pointer;padding:6px;background:none;border:none}
   .hamburger span{display:block;width:22px;height:2px;background:var(--text);border-radius:2px;transition:all 0.3s}
-  .mobile-nav{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(8,12,20,0.97);z-index:600;flex-direction:column;align-items:center;justify-content:center;gap:28px}
+  .mobile-nav{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(27,58,45,0.97);z-index:600;flex-direction:column;align-items:center;justify-content:center;gap:28px}
   .mobile-nav.open{display:flex}
-  .mobile-nav a{font-family:'Bebas Neue',sans-serif;font-size:40px;letter-spacing:0.08em;color:var(--text2);text-decoration:none;cursor:pointer;transition:color 0.2s}
+  .mobile-nav a{font-family:'Nunito',sans-serif;font-weight:900;font-size:36px;letter-spacing:0.04em;color:var(--text2);text-decoration:none;cursor:pointer;transition:color 0.2s}
   .mobile-nav a:hover,.mobile-nav a:active{color:var(--accent)}
   .mobile-nav-close{position:absolute;top:20px;right:20px;background:none;border:none;color:var(--text2);font-size:32px;cursor:pointer;line-height:1}
 
@@ -910,7 +979,7 @@
     header{padding:0 16px;height:56px}
     nav{display:none !important}
     .hamburger{display:flex}
-    .logo-text{font-size:20px}
+    .logo-text{font-size:18px}
     .logo-sub{display:none}
     .user-btn{padding:6px 10px;font-size:10px}
     #userBtnLabel{display:none}
@@ -997,6 +1066,7 @@
 <!-- HEADER -->
 <header>
   <div class="logo" onclick="window.scrollTo({top:0,behavior:'smooth'})">
+    
     <span class="logo-text">GECKO LAB</span>
     <span class="logo-sub">REPTILE GOODS</span>
   </div>
@@ -1317,10 +1387,29 @@
             <div class="form-group"><label class="form-label">판매가 (원) *</label><input class="form-input" id="newProductPrice" type="number" placeholder="15000"></div>
             <div class="form-group"><label class="form-label">정가 (할인 시)</label><input class="form-input" id="newProductOrigPrice" type="number" placeholder="20000"></div>
             <div class="form-group"><label class="form-label">뱃지</label><select class="form-select" id="newProductBadge"><option value="">없음</option><option value="NEW">NEW</option><option value="BEST">BEST</option><option value="SALE">SALE</option></select></div>
-            <div class="form-group"><label class="form-label">이모지</label><input class="form-input" id="newProductEmoji" placeholder="🦎" maxlength="4"></div>
+            <div class="form-group"><label class="form-label">이모지 (이미지 없을 때)</label><input class="form-input" id="newProductEmoji" placeholder="🦎" maxlength="4"></div>
+            <div class="form-group full">
+              <label class="form-label">상품 이미지</label>
+              <div class="image-upload-wrap" id="imageDropZone"
+                onclick="document.getElementById('newProductImage').click()"
+                ondragover="handleDragOver(event)"
+                ondragleave="handleDragLeave(event)"
+                ondrop="handleDrop(event)">
+                <div id="imagePreviewWrap" style="display:none">
+                  <img id="imagePreview" style="max-height:180px;max-width:100%;border-radius:4px;object-fit:contain;">
+                  <div style="font-size:11px;color:var(--text3);margin-top:8px">클릭하거나 새 이미지를 드래그해서 교체</div>
+                </div>
+                <div id="imageUploadPlaceholder">
+                  <div style="font-size:36px;margin-bottom:8px">📷</div>
+                  <div style="font-size:12px;color:var(--text2);margin-bottom:4px">클릭, 드래그 앤 드롭, 또는 Ctrl+V</div>
+                  <div style="font-size:11px;color:var(--text3)">JPG, PNG, WEBP 지원</div>
+                </div>
+              </div>
+              <input type="file" id="newProductImage" accept="image/*" style="display:none" onchange="previewImage(this)">
+            </div>
             <div class="form-group full"><label class="form-label">상품 설명 *</label><textarea class="form-textarea" id="newProductDesc" placeholder="상품 설명을 자세히 입력하세요"></textarea></div>
           </div>
-          <div class="form-row-actions"><button class="admin-btn" onclick="switchAdminPage('products')">취소</button><button class="admin-btn primary" onclick="submitNewProduct()">상품 등록</button></div>
+          <div class="form-row-actions"><button class="admin-btn" onclick="switchAdminPage('products')">취소</button><button class="admin-btn primary" id="productSubmitBtn" onclick="submitNewProduct()">상품 등록</button></div>
         </div>
       </div>
       <div class="admin-page" id="admin-users">
@@ -1390,6 +1479,76 @@
   function closeNoticeWrite() { document.getElementById('noticeWriteModal').classList.remove('open'); }
 
   function closeAdmin() { document.getElementById('adminPanel').classList.remove('open'); }
+
+  window.previewReviewImage = function(input) {
+    if (input.files && input.files[0]) {
+      const file = input.files[0];
+      if (!file.type.startsWith('image/')) { showToast('이미지 파일만 가능해요.', 'error'); return; }
+      const reader = new FileReader();
+      reader.onload = e => {
+        const preview = document.getElementById('reviewImgPreview');
+        const label = document.getElementById('reviewImgLabel');
+        preview.src = e.target.result;
+        preview.style.display = 'block';
+        label.textContent = '📷 사진 변경';
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  function previewImage(input) {
+    if (input.files && input.files[0]) {
+      setImageFile(input.files[0]);
+    }
+  }
+
+  function setImageFile(file) {
+    if (!file.type.startsWith('image/')) { showToast('이미지 파일만 업로드 가능해요.', 'error'); return; }
+    // 파일 input에 세팅
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    document.getElementById('newProductImage').files = dt.files;
+    // 미리보기
+    const reader = new FileReader();
+    reader.onload = e => {
+      document.getElementById('imagePreview').src = e.target.result;
+      document.getElementById('imagePreviewWrap').style.display = 'block';
+      document.getElementById('imageUploadPlaceholder').style.display = 'none';
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // 드래그 앤 드롭
+  function handleDragOver(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    document.getElementById('imageDropZone').classList.add('drag-over');
+  }
+  function handleDragLeave(e) {
+    e.preventDefault();
+    document.getElementById('imageDropZone').classList.remove('drag-over');
+  }
+  function handleDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    document.getElementById('imageDropZone').classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) setImageFile(file);
+  }
+
+  // 클립보드 붙여넣기 (Ctrl+V)
+  document.addEventListener('paste', e => {
+    const adminPanel = document.getElementById('adminPanel');
+    if (!adminPanel.classList.contains('open')) return;
+    const items = e.clipboardData.items;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) { setImageFile(file); showToast('클립보드 이미지가 붙여넣어졌어요! 📋', 'success'); }
+        break;
+      }
+    }
+  });
 
   function openMobileNav() { document.getElementById('mobileNav').classList.add('open'); document.body.style.overflow='hidden'; }
   function closeMobileNav() { document.getElementById('mobileNav').classList.remove('open'); document.body.style.overflow=''; }
