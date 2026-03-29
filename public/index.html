@@ -410,9 +410,9 @@ footer{background:var(--accent);border-top:2px solid var(--border);padding:44px 
 <!-- MOBILE NAV -->
 <div class="mobile-nav" id="mobileNav">
   <button class="mobile-nav-close" onclick="closeMobileNav()">✕</button>
-  <a onclick="closeMobileNav();scrollToEl('products')">상품</a>
-  <a onclick="closeMobileNav();scrollToEl('noticeSection')">공지사항</a>
-  <a onclick="closeMobileNav();scrollToEl('products')">리뷰</a>
+  <a onclick="closeMobileNav();scrollTo('products')">상품</a>
+  <a onclick="closeMobileNav();scrollTo('noticeSection')">공지사항</a>
+  <a onclick="closeMobileNav();scrollTo('products')">리뷰</a>
   <a onclick="closeMobileNav();openInquiry()">1:1 문의</a>
 </div>
 
@@ -423,9 +423,9 @@ footer{background:var(--accent);border-top:2px solid var(--border);padding:44px 
     <span class="logo-sub">REPTILE GOODS</span>
   </div>
   <nav>
-    <a onclick="scrollToEl('products')">상품</a>
-    <a onclick="scrollToEl('noticeSection')">공지사항</a>
-    <a onclick="scrollToEl('products')">리뷰</a>
+    <a onclick="scrollTo('products')">상품</a>
+    <a onclick="scrollTo('noticeSection')">공지사항</a>
+    <a onclick="scrollTo('products')">리뷰</a>
     <a onclick="openInquiry()">1:1 문의</a>
   </nav>
   <button class="hamburger" onclick="openMobileNav()">
@@ -473,8 +473,8 @@ footer{background:var(--accent);border-top:2px solid var(--border);padding:44px 
     <h1 class="hero-title">YOUR <span>GECKO</span><br>DESERVES<br>THE BEST.</h1>
     <p class="hero-desc">3D 프린팅 기술로 만든 파충류 전용 용품. 게코의 자연 서식환경을 사육장에서 완벽하게 재현합니다.</p>
     <div class="hero-cta">
-      <button class="btn-primary" onclick="scrollToEl('products')">쇼핑하기</button>
-      <button class="btn-secondary" onclick="scrollToEl('noticeSection')">공지사항</button>
+      <button class="btn-primary" onclick="scrollTo('products')">쇼핑하기</button>
+      <button class="btn-secondary" onclick="scrollTo('noticeSection')">공지사항</button>
     </div>
   </div>
 </section>
@@ -523,14 +523,14 @@ footer{background:var(--accent);border-top:2px solid var(--border);padding:44px 
     </div>
     <div>
       <div class="footer-col-title">쇼핑</div>
-      <a class="footer-link" onclick="scrollToEl('products')">사육환경 용품</a>
-      <a class="footer-link" onclick="scrollToEl('products')">먹이/영양제</a>
-      <a class="footer-link" onclick="scrollToEl('products')">악세서리</a>
+      <a class="footer-link" onclick="scrollTo('products')">사육환경 용품</a>
+      <a class="footer-link" onclick="scrollTo('products')">먹이/영양제</a>
+      <a class="footer-link" onclick="scrollTo('products')">악세서리</a>
     </div>
     <div>
       <div class="footer-col-title">고객센터</div>
-      <a class="footer-link" onclick="scrollToEl('noticeSection')">공지사항</a>
-      <a class="footer-link" onclick="scrollToEl('noticeSection')">주문/배송 안내</a>
+      <a class="footer-link" onclick="scrollTo('noticeSection')">공지사항</a>
+      <a class="footer-link" onclick="scrollTo('noticeSection')">주문/배송 안내</a>
       <a class="footer-link" onclick="openInquiry()">1:1 문의</a>
     </div>
   </div>
@@ -865,7 +865,7 @@ footer{background:var(--accent);border-top:2px solid var(--border);padding:44px 
 <!-- FIREBASE -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, updateProfile } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, updateProfile, sendEmailVerification } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, addDoc, deleteDoc, updateDoc, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 
@@ -946,7 +946,18 @@ window.doLogin = async function() {
   const errEl = document.getElementById('loginError');
   errEl.classList.remove('show');
   try {
-    await signInWithEmailAndPassword(auth, email, pw);
+    const cred = await signInWithEmailAndPassword(auth, email, pw);
+    if (!cred.user.emailVerified) {
+      await signOut(auth);
+      errEl.textContent = '이메일 인증이 필요해요. 받은 편지함을 확인해주세요.';
+      errEl.classList.add('show');
+      // 재발송 버튼
+      document.getElementById('loginError').innerHTML = `
+        이메일 인증이 필요해요.
+        <span style="color:var(--accent);cursor:pointer;font-weight:800;margin-left:6px"
+          onclick="resendVerification('${email}','${pw}')">인증 메일 재발송</span>`;
+      return;
+    }
     closeAuth();
     toast('로그인했어요! 👋', 'success');
   } catch(e) {
@@ -993,12 +1004,24 @@ window.doRegister = async function() {
       joinDate: new Date().toLocaleDateString('ko-KR'),
       createdAt: serverTimestamp()
     });
+    await sendEmailVerification(cred.user);
     closeAuth();
-    toast(`환영합니다, ${nickname}님! 🦎`, 'success');
+    toast(`환영합니다, ${nickname}님! 인증 메일을 확인해주세요 📧`, 'success');
   } catch(e) {
     if (e.code==='auth/email-already-in-use') errEl.textContent='이미 가입된 이메일이에요.';
     else errEl.textContent=e.message;
     errEl.classList.add('show');
+  }
+};
+
+window.resendVerification = async function(email, pw) {
+  try {
+    const cred = await signInWithEmailAndPassword(auth, email, pw);
+    await sendEmailVerification(cred.user);
+    await signOut(auth);
+    toast('인증 메일을 재발송했어요! 받은 편지함을 확인해주세요 📧', 'success');
+  } catch(e) {
+    toast('재발송 실패: ' + e.message, 'error');
   }
 };
 
@@ -1172,6 +1195,10 @@ window.submitReview = async function(productId) {
   const text = document.getElementById('reviewText').value.trim();
   if (!text) { toast('리뷰 내용을 입력해주세요.'); return; }
 
+  // 이메일 인증 확인
+  if (!currentUser.emailVerified) {
+    toast('이메일 인증 후 리뷰를 작성할 수 있어요. 📧', 'error'); return;
+  }
   // 1인 1리뷰 체크
   const existing = await getDocs(collection(db,'products',productId,'reviews'));
   if (existing.docs.some(d=>d.data().uid===currentUser.uid)) {
@@ -1224,7 +1251,6 @@ window.toggleLike = async function(productId, reviewId) {
 window.addCurrentToCart = function() {
   if (!currentProduct) return;
   if (!currentUser) { closeProductModal(); openAuth(); return; }
-  currentQty = parseInt(document.getElementById('modalQty').value) || 1;
   addToCart(currentProduct, currentQty);
   closeProductModal();
 };
@@ -1305,24 +1331,21 @@ window.completePurchase = async function() {
 };
 
 // ── NOTICES ───────────────────────────────────────────────
-let noticesCache = [];
 async function loadNotices() {
   const snap = await getDocs(query(collection(db,'notices'), orderBy('createdAt','desc')));
-  noticesCache = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const notices = snap.docs.map(d=>({id:d.id,...d.data()}));
   const el = document.getElementById('noticeList');
-  if (!noticesCache.length) { el.innerHTML='<div style="padding:20px;text-align:center;color:var(--text3);font-size:13px">공지사항이 없어요.</div>'; return; }
-  el.innerHTML = noticesCache.map((n,i)=>`
-    <div class="board-item" onclick="viewNotice('${esc(n.id)}')">
-      <span class="board-num">${noticesCache.length-i}</span>
+  if (!notices.length) { el.innerHTML='<div style="padding:20px;text-align:center;color:var(--text3);font-size:13px">공지사항이 없어요.</div>'; return; }
+  el.innerHTML = notices.map((n,i)=>`
+    <div class="board-item" onclick="viewNotice(${JSON.stringify(n).replace(/</g,'&lt;')})">
+      <span class="board-num">${notices.length-i}</span>
       <span class="board-title">${esc(n.title)}${i===0?'<span class="board-badge">NEW</span>':''}</span>
       <span class="board-author">${esc(n.author||'관리자')}</span>
       <span class="board-date">${esc(n.date||'')}</span>
     </div>`).join('');
 }
 
-window.viewNotice = function(id) {
-  const n = noticesCache.find(x=>x.id===id);
-  if (!n) return;
+window.viewNotice = function(n) {
   document.getElementById('noticeViewTitle').textContent = n.title;
   document.getElementById('noticeViewMeta').textContent = `${n.author||'관리자'} | ${n.date||''}`;
   document.getElementById('noticeViewBody').innerHTML = esc(n.content||'').split('\n').join('<br>');
@@ -1345,6 +1368,10 @@ window.submitNotice = async function() {
 // ── 1대1 문의 ─────────────────────────────────────────────
 window.submitInquiry = async function() {
   if (!currentUser) { closeInquiry(); openAuth(); return; }
+  if (!currentUser.emailVerified) {
+    toast('이메일 인증 후 문의를 작성할 수 있어요. 📧', 'error');
+    closeInquiry(); return;
+  }
   const title = document.getElementById('inquiryTitle').value.trim();
   const content = document.getElementById('inquiryContent').value.trim();
   if (!title||!content) { toast('제목과 내용을 입력해주세요.'); return; }
@@ -1683,7 +1710,7 @@ init();
 
 <!-- UI SCRIPT (non-module) -->
 <script>
-function scrollToEl(id) { document.getElementById(id)?.scrollIntoView({behavior:'smooth'}); }
+function scrollTo(id) { document.getElementById(id)?.scrollIntoView({behavior:'smooth'}); }
 function handleUserBtn() {
   const dd = document.getElementById('userDropdown');
   if (document.getElementById('userBtnLabel').textContent==='로그인') openAuth();
