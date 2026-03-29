@@ -5,1048 +5,404 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GECKO LAB — 파충류 용품 전문점</title>
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800;900&family=Noto+Sans+KR:wght@300;400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-
-<!-- Firebase SDK -->
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
-  import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, updateProfile } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-  import { getFirestore, collection, doc, setDoc, getDoc, getDocs, addDoc, deleteDoc, updateDoc, onSnapshot, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-  import { getStorage, ref, uploadBytesResumable, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
-
-  const firebaseConfig = {
-    apiKey: "AIzaSyDbqerIemczisX0bSG11OAQMiKEaUQmw4I",
-    authDomain: "geckolab-8961f.firebaseapp.com",
-    projectId: "geckolab-8961f",
-    storageBucket: "geckolab-8961f.firebasestorage.app",
-    messagingSenderId: "480270406749",
-    appId: "1:480270406749:web:87c33cf691608fb7f669b4",
-    measurementId: "G-BQZFXD7J31"
-  };
-
-  const app = initializeApp(firebaseConfig);
-  const auth = getAuth(app);
-  const db = getFirestore(app);
-  const googleProvider = new GoogleAuthProvider();
-  const storage = getStorage(app);
-
-  // 관리자 이메일
-  const ADMIN_EMAIL = "admin@geckolab.kr";
-
-  // ── 전역 상태 ──────────────────────────────────────────
-  let currentUser = null;
-  let isAdmin = false;
-  let products = [];
-  let cart = [];
-  let currentProduct = null;
-  let currentQty = 1;
-  let activeFilter = 'all';
-  let selectedReviewStars = 5;
-
-  // ── 초기 상품 데이터 (Firestore에 없을 때 seed) ────────
-  const defaultProducts = [
-    { name: '레오파드 게코 하이드 박스', category: 'habitat', categoryLabel: '사육환경', badge: 'BEST', badgeClass: 'badge-best', price: 15000, origPrice: null, emoji: '🦎', rating: 4.8, reviewCount: 42, desc: '레오파드 게코의 은신처로 최적화된 3D 프린팅 하이드 박스. 습도 유지를 위한 물 트레이가 내장되어 있으며 탈피를 돕습니다.' },
-    { name: '사막 배경 코르크 보드', category: 'habitat', categoryLabel: '사육환경', badge: 'NEW', badgeClass: 'badge-new', price: 28000, origPrice: null, emoji: '🌵', rating: 4.7, reviewCount: 31, desc: '천연 코르크 소재로 제작된 사막 배경 패널. 도마뱀의 자연 서식지를 완벽하게 재현합니다.' },
-    { name: '스타터 세트 (하이드+급수기+식기)', category: 'habitat', categoryLabel: '사육환경', badge: null, price: 38000, origPrice: 48000, emoji: '🎁', rating: 4.9, reviewCount: 78, desc: '게코 입문자를 위한 완벽한 스타터 세트. 하이드 박스, 급수기, 식기를 한번에 구성했습니다.' },
-    { name: '레오파드 게코 습식 슬레이브', category: 'habitat', categoryLabel: '사육환경', badge: 'SALE', badgeClass: 'badge-sale', price: 19000, origPrice: 24000, emoji: '💧', rating: 4.6, reviewCount: 55, desc: '탈피를 도와주는 습식 슬레이브. 내부에 물을 적신 스펀지를 넣어 적절한 습도를 유지합니다.' },
-    { name: '파충류 비타민 스프레이', category: 'feeding', categoryLabel: '먹이/영양제', badge: 'NEW', badgeClass: 'badge-new', price: 12000, origPrice: null, emoji: '🌟', rating: 4.5, reviewCount: 23, desc: '게코에게 필수 비타민과 미네랄을 간편하게 공급. 먹이에 뿌려서 급여하거나 사육장 내 분무.' },
-    { name: '사육장 배경 데코 패널', category: 'accessory', categoryLabel: '악세서리', badge: null, price: 35000, origPrice: null, emoji: '🎨', rating: 4.9, reviewCount: 18, desc: '3D 프린팅으로 제작한 입체감 있는 사육장 배경 패널. 자연 암석 질감 재현. 다양한 컬러 주문 가능.' }
-  ];
-
-  // ── Firestore 초기화 (상품 seed) ───────────────────────
-  async function seedProductsIfEmpty() {
-    const snap = await getDocs(collection(db, 'products'));
-    if (snap.empty) {
-      for (const p of defaultProducts) {
-        await addDoc(collection(db, 'products'), { ...p, createdAt: serverTimestamp() });
-      }
-    }
-  }
-
-  // ── 상품 로드 ──────────────────────────────────────────
-  async function loadProducts() {
-    const snap = await getDocs(query(collection(db, 'products'), orderBy('createdAt', 'asc')));
-    products = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    applyFilter();
-  }
-
-  // ── 공지사항 로드 ──────────────────────────────────────
-  async function loadNotices() {
-    const snap = await getDocs(query(collection(db, 'notices'), orderBy('createdAt', 'desc')));
-    const notices = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    renderNotices(notices);
-  }
-
-  // ── AUTH 상태 감지 ─────────────────────────────────────
-  onAuthStateChanged(auth, async (user) => {
-    if (user) {
-      currentUser = user;
-      isAdmin = user.email === ADMIN_EMAIL;
-      updateHeaderAuth();
-    } else {
-      currentUser = null;
-      isAdmin = false;
-      updateHeaderAuth();
-    }
-  });
-
-  // ── 로그인 (이메일) ────────────────────────────────────
-  window.doLogin = async function() {
-    const email = document.getElementById('loginEmail').value.trim();
-    const pw = document.getElementById('loginPassword').value;
-    const errEl = document.getElementById('loginError');
-    errEl.classList.remove('show');
-    try {
-      await signInWithEmailAndPassword(auth, email, pw);
-      closeAuth();
-      showToast('로그인 했습니다! 👋', 'success');
-    } catch (e) {
-      errEl.textContent = '이메일 또는 비밀번호가 올바르지 않아요.';
-      errEl.classList.add('show');
-    }
-  };
-
-  // ── 구글 로그인 ────────────────────────────────────────
-  window.doGoogleLogin = async function() {
-    try {
-      const result = await signInWithPopup(auth, googleProvider);
-      // Firestore에 유저 정보 저장
-      await setDoc(doc(db, 'users', result.user.uid), {
-        nickname: result.user.displayName || '게코유저',
-        email: result.user.email,
-        role: result.user.email === ADMIN_EMAIL ? 'admin' : 'user',
-        status: 'active',
-        joinDate: new Date().toLocaleDateString('ko-KR')
-      }, { merge: true });
-      closeAuth();
-      showToast(`환영합니다, ${result.user.displayName}님! 🦎`, 'success');
-    } catch (e) {
-      showToast('구글 로그인 실패: ' + e.message, 'error');
-    }
-  };
-
-  // ── 회원가입 ───────────────────────────────────────────
-  window.doRegister = async function() {
-    const nickname = document.getElementById('regNickname').value.trim();
-    const email = document.getElementById('regEmail').value.trim();
-    const pw = document.getElementById('regPassword').value;
-    const pwc = document.getElementById('regPasswordConfirm').value;
-    const agree = document.getElementById('agreeTerms').checked;
-    const errEl = document.getElementById('registerError');
-    errEl.classList.remove('show');
-
-    if (!nickname || !email || !pw) { errEl.textContent = '모든 항목을 입력해주세요.'; errEl.classList.add('show'); return; }
-    if (pw.length < 8) { errEl.textContent = '비밀번호는 8자 이상이어야 해요.'; errEl.classList.add('show'); return; }
-    if (pw !== pwc) { errEl.textContent = '비밀번호가 일치하지 않아요.'; errEl.classList.add('show'); return; }
-    if (!agree) { errEl.textContent = '이용약관에 동의해주세요.'; errEl.classList.add('show'); return; }
-
-    try {
-      const cred = await createUserWithEmailAndPassword(auth, email, pw);
-      await updateProfile(cred.user, { displayName: nickname });
-      await setDoc(doc(db, 'users', cred.user.uid), {
-        nickname, email,
-        role: email === ADMIN_EMAIL ? 'admin' : 'user',
-        status: 'active',
-        joinDate: new Date().toLocaleDateString('ko-KR'),
-        createdAt: serverTimestamp()
-      });
-      closeAuth();
-      showToast(`환영합니다, ${nickname}님! 🦎`, 'success');
-    } catch (e) {
-      if (e.code === 'auth/email-already-in-use') errEl.textContent = '이미 가입된 이메일이에요.';
-      else errEl.textContent = e.message;
-      errEl.classList.add('show');
-    }
-  };
-
-  // ── 로그아웃 ───────────────────────────────────────────
-  window.logout = async function() {
-    await signOut(auth);
-    document.getElementById('userDropdown').classList.remove('open');
-    closeAdmin();
-    showToast('로그아웃 되었습니다.');
-  };
-
-  // ── 헤더 업데이트 ──────────────────────────────────────
-  function updateHeaderAuth() {
-    const btn = document.getElementById('userBtn');
-    const label = document.getElementById('userBtnLabel');
-    const icon = document.getElementById('userBtnIcon');
-    const adminLink = document.getElementById('adminMenuLink');
-
-    if (currentUser) {
-      btn.classList.add('logged');
-      icon.textContent = '✅';
-      label.textContent = currentUser.displayName || currentUser.email.split('@')[0];
-      document.getElementById('dropdownName').textContent = currentUser.displayName || '사용자';
-      document.getElementById('dropdownEmail').textContent = currentUser.email;
-      adminLink.style.display = isAdmin ? 'block' : 'none';
-    } else {
-      btn.classList.remove('logged');
-      icon.textContent = '👤';
-      label.textContent = '로그인';
-      adminLink.style.display = 'none';
-    }
-  }
-
-  // ── 상품 렌더링 ────────────────────────────────────────
-  function renderProducts(list) {
-    const grid = document.getElementById('productGrid');
-    document.getElementById('productCount').textContent = `${list.length}개 상품`;
-    grid.innerHTML = list.map(p => `
-      <div class="product-card" onclick="openProduct('${escapeHtml(p.id)}')">
-        <div class="product-img-wrap">
-          ${p.imageUrl
-            ? `<img src="${p.imageUrl}" alt="${p.name}" style="width:100%;height:100%;object-fit:cover;">`
-            : `<div class="product-emoji">${p.emoji || '🦎'}</div>`}
-          ${p.badge ? `<span class="product-badge ${escapeHtml(p.badgeClass || 'badge-new')}">${escapeHtml(p.badge)}</span>` : ''}
-          <button class="quick-add" onclick="event.stopPropagation(); quickAdd('${p.id}')">+ 빠른 추가</button>
-        </div>
-        <div class="product-info">
-          <div class="product-category">${p.categoryLabel}</div>
-          <div class="product-name">${p.name}</div>
-          <div class="product-footer">
-            <div>
-              <span class="product-price">₩${p.price.toLocaleString()}</span>
-              ${p.origPrice ? `<span class="product-price-orig">₩${p.origPrice.toLocaleString()}</span>` : ''}
-            </div>
-            <div class="product-stars">${'★'.repeat(Math.floor(p.rating))}<span>(${p.reviewCount})</span></div>
-          </div>
-        </div>
-      </div>
-    `).join('');
-  }
-
-  window.filterProducts = function(cat, btn) {
-    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    activeFilter = cat;
-    applyFilter();
-  };
-
-  window.sortProducts = function(val) { applyFilter(val); };
-
-  function applyFilter(sortVal) {
-    let list = activeFilter === 'all' ? [...products] : products.filter(p => p.category === activeFilter);
-    const sort = sortVal || document.querySelector('.sort-select')?.value || 'default';
-    if (sort === 'price-asc') list.sort((a, b) => a.price - b.price);
-    else if (sort === 'price-desc') list.sort((a, b) => b.price - a.price);
-    else if (sort === 'rating') list.sort((a, b) => b.rating - a.rating);
-    renderProducts(list);
-  }
-
-  // ── 상품 모달 ──────────────────────────────────────────
-  window.openProduct = async function(id) {
-    const p = products.find(x => x.id === id);
-    if (!p) return;
-    currentProduct = p;
-    currentQty = 1;
-    document.getElementById('modalQty').value = 1;
-    document.getElementById('modalCat').textContent = p.categoryLabel;
-    document.getElementById('modalName').textContent = p.name;
-    document.getElementById('modalStars').innerHTML = `${'★'.repeat(Math.floor(p.rating))} <span>${p.rating} (${p.reviewCount}개 리뷰)</span>`;
-    document.getElementById('modalDesc').textContent = p.desc;
-    document.getElementById('modalPrice').textContent = `₩${p.price.toLocaleString()}`;
-    document.getElementById('modalOrig').textContent = p.origPrice ? `₩${p.origPrice.toLocaleString()}` : '';
-    document.getElementById('modalImgSection').innerHTML = p.imageUrl
-      ? `<img src="${p.imageUrl}" alt="${p.name}" style="width:100%;height:100%;object-fit:cover;">`
-      : `<span style="font-size:120px">${p.emoji || '🦎'}</span>`;
-
-    // 리뷰 로드
-    const revSnap = await getDocs(query(collection(db, 'products', id, 'reviews'), orderBy('createdAt', 'desc')));
-    const revs = revSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-    document.getElementById('modalReviews').innerHTML = `
-      <div class="reviews-title">리뷰 (${revs.length})</div>
-      ${revs.length === 0 ? '<p style="color:var(--text3);font-size:13px;">아직 리뷰가 없어요!</p>' :
-        revs.map(r => {
-          const likedBy = r.likedBy || [];
-          const liked = currentUser && likedBy.includes(currentUser.uid);
-          const likeCount = likedBy.length;
-          return `
-          <div class="review-item">
-            <div class="review-header">
-              <div class="review-avatar">${escapeHtml((r.nickname||'?')[0])}</div>
-              <div class="review-meta">
-                <div class="review-name">${escapeHtml(r.nickname || '익명')}</div>
-                <div class="review-date">${escapeHtml(r.date || '')}</div>
-              </div>
-              <div class="review-stars">${'★'.repeat(Math.min(Math.max(parseInt(r.stars)||0,0),5))}</div>
-            </div>
-            <div class="review-body">${escapeHtml(r.text)}</div>
-            ${r.reviewImageUrl && r.reviewImageUrl.startsWith('https://') ? `<img src="${escapeHtml(r.reviewImageUrl)}" alt="리뷰 이미지" style="max-width:100%;max-height:200px;object-fit:contain;border-radius:6px;margin-top:10px;cursor:pointer;" onclick="window.open(this.src,'_blank')">` : ''}
-            <div class="review-footer">
-              <button class="like-btn ${liked ? 'liked' : ''}" onclick="toggleReviewLike('${escapeHtml(currentProduct?.id||'')}','${escapeHtml(r.id)}')">
-                👍 도움이 돼요 ${likeCount > 0 ? `<span class="like-count">${likeCount}</span>` : ''}
-              </button>
-            </div>
-          </div>
-        `}).join('')}
-    `;
-
-    const rfEl = document.getElementById('reviewFormSection');
-    if (currentUser) {
-      selectedReviewStars = 5;
-      rfEl.innerHTML = `
-        <div class="review-form">
-          <div class="review-form-title">리뷰 작성</div>
-          <div class="star-select" id="starSelect">
-            ${[1,2,3,4,5].map(n => `<span onclick="setReviewStar(${n})" class="active" data-star="${n}">★</span>`).join('')}
-          </div>
-          <textarea class="review-textarea" id="reviewText" placeholder="상품에 대한 솔직한 리뷰를 남겨주세요."></textarea>
-          <div class="review-img-upload" onclick="document.getElementById('reviewImageInput').click()">
-            <span id="reviewImgLabel">📷 사진 첨부 (선택)</span>
-            <img id="reviewImgPreview" style="display:none;max-height:120px;max-width:100%;border-radius:6px;margin-top:8px;object-fit:contain;">
-          </div>
-          <input type="file" id="reviewImageInput" accept="image/*" style="display:none" onchange="previewReviewImage(this)">
-          <button class="review-submit" onclick="submitReview('${id}')">리뷰 등록</button>
-        </div>
-      `;
-    } else {
-      rfEl.innerHTML = `<div style="font-size:12px;color:var(--text3);padding:0 0 16px">리뷰를 작성하려면 <span style="color:var(--accent);cursor:pointer" onclick="closeProductModal();openAuth()">로그인</span>이 필요해요.</div>`;
-    }
-
-    document.getElementById('productModal').classList.add('open');
-    document.body.style.overflow = 'hidden';
-  };
-
-  window.setReviewStar = function(n) {
-    selectedReviewStars = n;
-    document.querySelectorAll('#starSelect span').forEach((el, i) => {
-      el.classList.toggle('active', i < n);
-    });
-  };
-
-  window.submitReview = async function(productId) {
-    const text = document.getElementById('reviewText').value.trim();
-    if (!text) { showToast('리뷰 내용을 입력해주세요.'); return; }
-
-    // 1인 1리뷰 체크
-    const existingRevSnap = await getDocs(collection(db, 'products', productId, 'reviews'));
-    const alreadyWrote = existingRevSnap.docs.some(d => d.data().uid === currentUser.uid);
-    if (alreadyWrote) { showToast('이미 이 상품에 리뷰를 작성했어요!', 'error'); return; }
-
-    const submitBtn = document.querySelector('.review-submit');
-    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '등록 중...'; }
-
-    const now = new Date();
-    const dateStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`;
-
-    let reviewImageUrl = null;
-    const imageFile = document.getElementById('reviewImageInput')?.files[0];
-    if (imageFile) {
-      try {
-        const storageRef = ref(storage, `reviews/${Date.now()}_${imageFile.name}`);
-        const uploadTask = await uploadBytesResumable(storageRef, imageFile);
-        reviewImageUrl = await getDownloadURL(uploadTask.ref);
-      } catch(e) {
-        showToast('이미지 업로드 실패', 'error');
-      }
-    }
-
-    await addDoc(collection(db, 'products', productId, 'reviews'), {
-      nickname: currentUser.displayName || '익명',
-      uid: currentUser.uid,
-      stars: selectedReviewStars,
-      text, date: dateStr,
-      reviewImageUrl,
-      createdAt: serverTimestamp()
-    });
-    // 리뷰 카운트 업데이트
-    const revSnap = await getDocs(collection(db, 'products', productId, 'reviews'));
-    const revs = revSnap.docs.map(d => d.data());
-    const avgRating = parseFloat((revs.reduce((s,r)=>s+r.stars,0)/revs.length).toFixed(1));
-    await updateDoc(doc(db, 'products', productId), { reviewCount: revs.length, rating: avgRating });
-    await loadProducts();
-    closeProductModal();
-    showToast('리뷰가 등록됐어요! 감사합니다 🦎', 'success');
-  };
-
-  // ── 장바구니 ───────────────────────────────────────────
-  window.addCurrentToCart = function() {
-    if (!currentProduct) return;
-    if (!currentUser) { closeProductModal(); openAuth(); return; }
-    addToCart(currentProduct, currentQty);
-    closeProductModal();
-  };
-
-  window.quickAdd = function(id) {
-    if (!currentUser) { openAuth(); return; }
-    const p = products.find(x => x.id === id);
-    if (p) addToCart(p);
-  };
-
-  function addToCart(product, qty = 1) {
-    const existing = cart.find(i => i.id === product.id);
-    if (existing) existing.qty += qty;
-    else cart.push({ ...product, qty });
-    updateCartUI();
-    showToast(`'${product.name}' 담았어요!`);
-  }
-
-  window.removeFromCart = function(id) { cart = cart.filter(i => i.id !== id); updateCartUI(); };
-
-  function updateCartUI() {
-    const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
-    document.getElementById('cartCount').textContent = cart.reduce((s, i) => s + i.qty, 0);
-    document.getElementById('cartTotal').textContent = `₩${total.toLocaleString()}`;
-    document.getElementById('checkoutTotal').textContent = `₩${total.toLocaleString()}`;
-    const itemsEl = document.getElementById('cartItems');
-    const emptyEl = document.getElementById('cartEmpty');
-    if (cart.length === 0) {
-      itemsEl.innerHTML = ''; itemsEl.appendChild(emptyEl); emptyEl.style.display = 'flex';
-    } else {
-      emptyEl.style.display = 'none'; itemsEl.innerHTML = ''; itemsEl.appendChild(emptyEl);
-      cart.forEach(item => {
-        const el = document.createElement('div');
-        el.className = 'cart-item';
-        el.innerHTML = `
-          <div class="cart-item-img">${item.emoji || '🦎'}</div>
-          <div class="cart-item-info">
-            <div class="cart-item-name">${item.name}</div>
-            <div class="cart-item-price">₩${item.price.toLocaleString()}</div>
-            <div class="cart-item-qty">수량: ${item.qty}개</div>
-          </div>
-          <button class="cart-item-remove" onclick="removeFromCart('${item.id}')">✕</button>
-        `;
-        itemsEl.appendChild(el);
-      });
-    }
-  }
-
-  // ── 공지사항 ───────────────────────────────────────────
-  function renderNotices(notices) {
-    const el = document.getElementById('noticeList');
-    if (!notices.length) { el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px;">공지사항이 없어요.</div>'; return; }
-    el.innerHTML = notices.map((n, i) => `
-      <div class="board-item" onclick="viewNotice('${escapeHtml(n.id)}','${encodeURIComponent(n.title)}','${encodeURIComponent(n.content)}','${escapeHtml(n.author||'관리자')}','${escapeHtml(n.date||'')}')">
-        <span class="board-num">${notices.length - i}</span>
-        <span class="board-title">${escapeHtml(n.title)}${i===0?'<span class="board-badge">NEW</span>':''}</span>
-        <span class="board-author">${escapeHtml(n.author||'관리자')}</span>
-        <span class="board-date">${escapeHtml(n.date||'')}</span>
-      </div>
-    `).join('');
-  }
-
-  window.viewNotice = function(id, title, content, author, date) {
-    document.getElementById('noticeViewTitle').textContent = decodeURIComponent(title);
-    document.getElementById('noticeViewMeta').textContent = `${escapeHtml(author)} | ${escapeHtml(date)}`;
-    document.getElementById('noticeViewBody').innerHTML = escapeHtml(decodeURIComponent(content)).split('\n').join('<br>');
-    document.getElementById('noticeViewModal').classList.add('open');
-  };
-
-  // ── 1대1 문의 제출 ─────────────────────────────────────
-  window.submitInquiry = async function() {
-    const title = document.getElementById('inquiryTitle').value.trim();
-    const content = document.getElementById('inquiryContent').value.trim();
-    if (!title || !content) { showToast('제목과 내용을 입력해주세요.'); return; }
-    const now = new Date();
-    const dateStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`;
-    await addDoc(collection(db, 'inquiries'), {
-      uid: currentUser?.uid || '',
-      nickname: currentUser?.displayName || '익명',
-      email: currentUser?.email || '',
-      title, content,
-      status: '답변대기',
-      answer: null,
-      date: dateStr,
-      createdAt: serverTimestamp()
-    });
-    document.getElementById('inquiryTitle').value = '';
-    document.getElementById('inquiryContent').value = '';
-    document.getElementById('inquiryWriteModal').classList.remove('open');
-    showToast('문의가 접수됐어요! 빠르게 답변드릴게요 😊', 'success');
-    await loadInquiries();
-  };
-
-  // ── 관리자 문의 답변 ────────────────────────────────────
-  window.answerInquiry = async function(id) {
-    const answer = document.getElementById(`answer_${id}`).value.trim();
-    if (!answer) { showToast('답변 내용을 입력해주세요.'); return; }
-    await updateDoc(doc(db, 'inquiries', id), { answer, status: '답변완료' });
-    await renderAdminInquiries();
-    showToast('답변이 등록됐어요!', 'success');
-  };
-
-  // ── 문의 목록 로드 ──────────────────────────────────────
-  async function loadInquiries() {
-    const snap = await getDocs(query(collection(db, 'inquiries'), orderBy('createdAt', 'desc')));
-    const inquiries = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    renderInquiryList(inquiries);
-  }
-
-  function renderInquiryList(inquiries) {
-    const el = document.getElementById('inquiryList');
-    if (!el) return;
-    if (!inquiries.length) {
-      el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px;">아직 문의가 없어요.</div>';
-      return;
-    }
-    // 내 문의만 표시 (비관리자)
-    const myInquiries = isAdmin ? inquiries : inquiries.filter(i => i.uid === currentUser?.uid);
-    el.innerHTML = myInquiries.map(i => `
-      <div class="board-item" onclick="viewInquiry('${escapeHtml(i.id)}','${encodeURIComponent(i.title)}','${encodeURIComponent(i.content)}','${encodeURIComponent(i.answer||'')}','${escapeHtml(i.status)}','${escapeHtml(i.nickname)}','${escapeHtml(i.date)}')">
-        <span class="board-num"><span class="status ${i.status==='답변완료'?'status-active':'status-pending'}" style="font-size:9px">${escapeHtml(i.status)}</span></span>
-        <span class="board-title">${escapeHtml(i.title)}</span>
-        <span class="board-author">${escapeHtml(i.nickname)}</span>
-        <span class="board-date">${escapeHtml(i.date)}</span>
-      </div>
-    `).join('') || '<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px;">문의 내역이 없어요.</div>';
-  }
-
-  window.viewInquiry = function(id, title, content, answer, status, nickname, date) {
-    document.getElementById('inquiryViewTitle').textContent = decodeURIComponent(title);
-    document.getElementById('inquiryViewMeta').textContent = `${escapeHtml(nickname)} | ${escapeHtml(date)} | ${escapeHtml(status)}`;
-    document.getElementById('inquiryViewContent').innerHTML = escapeHtml(decodeURIComponent(content)).split('\n').join('<br>');
-    const answerEl = document.getElementById('inquiryViewAnswer');
-    const decoded = decodeURIComponent(answer);
-    if (decoded) {
-      answerEl.innerHTML = `<div style="font-family:'Space Mono',monospace;font-size:10px;color:var(--accent);margin-bottom:6px;letter-spacing:0.1em">GECKO LAB 답변</div>${escapeHtml(decoded).split('\n').join('<br>')}`;
-    } else {
-      answerEl.innerHTML = '<span style="color:var(--text3);font-size:13px">아직 답변이 등록되지 않았어요. 빠르게 답변드릴게요!</span>';
-    }
-    document.getElementById('inquiryViewModal').classList.add('open');
-  };
-
-async function renderAdminInquiries() {
-    const snap = await getDocs(query(collection(db, 'inquiries'), orderBy('createdAt', 'desc')));
-    const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    const el = document.getElementById('adminInquiriesList');
-    el.innerHTML = list.map(q => `
-      <div class="review-admin-item">
-        <div class="review-admin-header">
-          <div class="review-avatar">${escapeHtml((q.nickname||'?')[0])}</div>
-          <div>
-            <div class="review-name">${escapeHtml(q.nickname||'익명')}</div>
-            <div class="review-admin-product">${escapeHtml(q.date||'')}</div>
-          </div>
-          <span class="status ${q.answered?'status-active':'status-pending'}" style="margin-left:12px">${q.answered?'답변완료':'미답변'}</span>
-          <div class="review-admin-actions">
-            <button class="review-admin-btn delete" onclick="deleteInquiry('${q.id}')">삭제</button>
-          </div>
-        </div>
-        <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px">${escapeHtml(q.title||'')}</div>
-        <div class="review-body">${escapeHtml(q.content||'')}</div>
-        ${q.answer ? `<div style="margin-top:12px;padding:12px;background:var(--accent-dim);border-radius:4px;border-left:3px solid var(--accent)"><div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:4px">관리자 답변</div><div style="font-size:13px;color:var(--text2)">${escapeHtml(q.answer)}</div></div>` : ''}
-        <div style="margin-top:12px;display:flex;gap:8px">
-          <input class="admin-search" id="answerInput_${q.id}" placeholder="답변 입력..." style="flex:1;padding:8px 12px;font-size:12px" value="${escapeHtml(q.answer||'')}">
-          <button class="admin-btn primary" style="padding:8px 16px;font-size:11px" onclick="submitInquiryAnswer('${q.id}')">답변 등록</button>
-        </div>
-      </div>
-    `).join('') || '<div style="color:var(--text3);font-size:13px;padding:20px">문의가 없어요.</div>';
-  }
-
-  window.deleteInquiry = async function(id) {
-    if (!confirm('이 문의를 삭제하시겠어요?')) return;
-    await deleteDoc(doc(db, 'inquiries', id));
-    renderAdminInquiries();
-    showToast('문의가 삭제됐어요.');
-  };
-
-  window.submitInquiryAnswer = async function(id) {
-    const answer = document.getElementById(`answerInput_${id}`).value.trim();
-    if (!answer) { showToast('답변을 입력해주세요.'); return; }
-    await updateDoc(doc(db, 'inquiries', id), { answer, answered: true });
-    renderAdminInquiries();
-    showToast('답변이 등록됐어요! ✅', 'success');
-  };
-
-
-  window.updateOrderStatus = async function(orderId, status) {
-    await updateDoc(doc(db, 'orders', orderId), { status });
-    showToast(`주문 상태가 "${status}"로 변경됐어요.`, 'success');
-  };
-
-  window.deleteNotice = async function(id) {
-    if (!confirm('이 공지를 삭제하시겠어요?')) return;
-    await deleteDoc(doc(db, 'notices', id));
-    await loadNotices();
-    await renderAdminNotices();
-    showToast('공지가 삭제됐어요.');
-  };
-
-  window.deleteReview = async function(productId, reviewId) {
-    if (!confirm('이 리뷰를 삭제하시겠어요?')) return;
-    await deleteDoc(doc(db, 'products', productId, 'reviews', reviewId));
-    const revSnap = await getDocs(collection(db, 'products', productId, 'reviews'));
-    const revs = revSnap.docs.map(d => d.data());
-    if (revs.length > 0) {
-      const avg = parseFloat((revs.reduce((s,r)=>s+r.stars,0)/revs.length).toFixed(1));
-      await updateDoc(doc(db, 'products', productId), { reviewCount: revs.length, rating: avg });
-    } else {
-      await updateDoc(doc(db, 'products', productId), { reviewCount: 0, rating: 5.0 });
-    }
-    await loadProducts();
-    await renderAdminReviews();
-    showToast('리뷰가 삭제됐어요.');
-  };
-
-  window.deleteProduct = async function(id) {
-    if (!confirm('이 상품을 삭제하시겠어요?')) return;
-    await deleteDoc(doc(db, 'products', id));
-    await loadProducts();
-    renderAdminProducts(products);
-    showToast('상품이 삭제됐어요.');
-  };
-
-  window.toggleUserBlock = async function(uid, currentStatus) {
-    const newStatus = currentStatus === 'active' ? 'blocked' : 'active';
-    await updateDoc(doc(db, 'users', uid), { status: newStatus });
-    await renderAdminUsers();
-    showToast('회원 상태가 변경됐어요.');
-  };
-
-  window.switchAdminPage = async function(page) {
-    document.querySelectorAll('.admin-nav-item').forEach(el => el.classList.remove('active'));
-    document.querySelectorAll('.admin-page').forEach(el => el.classList.remove('active'));
-    document.querySelector(`.admin-nav-item[onclick="switchAdminPage('${page}')"]`)?.classList.add('active');
-    document.getElementById(`admin-${page}`)?.classList.add('active');
-    if (page === 'dashboard') await renderAdminDashboard();
-    else if (page === 'products') renderAdminProducts(products);
-    else if (page === 'users') await renderAdminUsers();
-    else if (page === 'notices') await renderAdminNotices();
-    else if (page === 'reviews') await renderAdminReviews();
-    else if (page === 'orders') await renderAdminOrders();
-    else if (page === 'inquiries') await renderAdminInquiries();
-    else if (page === 'orders') await renderAdminOrders();
-    else if (page === 'inquiries') await renderAdminInquiries();
-  };
-
-  window.openAdmin = async function() {
-    if (!isAdmin) { showToast('관리자 권한이 필요해요.'); return; }
-    document.getElementById('adminPanel').classList.add('open');
-    document.getElementById('userDropdown').classList.remove('open');
-    await renderAdminDashboard();
-  };
-
-  // ── 결제 완료 ──────────────────────────────────────────
-  window.completePurchase = async function() {
-    if (cart.length === 0) return;
-    const name = document.getElementById('checkoutName').value.trim() || (currentUser?.displayName || '미입력');
-    const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
-    const payBtn = document.querySelector('.pay-btn.active');
-    const payMethod = payBtn ? payBtn.textContent.trim() : '미선택';
-    const now = new Date();
-    const dateStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-    const orderItems = cart.map(i => ({ id: i.id, name: i.name, price: i.price, qty: i.qty, emoji: i.emoji || '🦎' }));
-    await addDoc(collection(db, 'orders'), {
-      uid: currentUser?.uid || 'guest',
-      nickname: currentUser?.displayName || name,
-      email: currentUser?.email || '',
-      name, payMethod, total, items: orderItems,
-      status: '결제완료',
-      date: dateStr,
-      createdAt: serverTimestamp()
-    });
-    cart = []; updateCartUI(); closeCheckout();
-    showToast('🎉 주문이 완료되었어요! 감사합니다.', 'success');
-  };
-
-  // ── 초기화 ─────────────────────────────────────────────
-  async function init() {
-    await seedProductsIfEmpty();
-    await loadProducts();
-    await loadNotices();
-    if (currentUser) await loadInquiries();
-  }
-  init();
-
-  // 로그인 상태 변경 시 문의 목록 갱신
-  onAuthStateChanged(auth, async (user) => {
-    if (user) await loadInquiries();
-  });
-
-  // ── 전역 함수 연결 ─────────────────────────────────────
-  window.showToast = showToast;
-
-  function showToast(msg, type = '') {
-    const t = document.getElementById('toast');
-    t.textContent = msg;
-    t.className = 'toast show' + (type ? ' ' + type : '');
-    setTimeout(() => t.className = 'toast', 2400);
-  }
-</script>
-
 <style>
-  :root {
-    --bg:#f8faf8;--bg2:#f0f4f0;--bg3:#e8f0e8;--surface:#ffffff;--surface2:#f4f8f4;
-    --border:#c8dcc8;--accent:#2d6a4f;--accent2:#40916c;--accent-dim:rgba(45,106,79,0.10);
-    --text:#1b3a2d;--text2:#4a7c59;--text3:#8aab8a;--danger:#e05a3a;--warn:#d4a843;--success:#2d6a4f;
-    --gold:#2d6a4f;--gold2:#40916c;
-  }
-  *{box-sizing:border-box;margin:0;padding:0}
-  html{scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:'Nunito','Noto Sans KR',sans-serif;font-weight:400;min-height:100vh}
-  @keyframes fadeIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
-  @keyframes ticker{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
-  ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:var(--bg2)}::-webkit-scrollbar-thumb{background:var(--accent);border-radius:2px}
+:root {
+  --bg:#f8faf8; --bg2:#f0f4f0; --bg3:#e8f0e8;
+  --surface:#ffffff; --surface2:#f4f8f4;
+  --border:#c8dcc8; --accent:#2d6a4f; --accent2:#40916c;
+  --accent-dim:rgba(45,106,79,0.10);
+  --text:#1b3a2d; --text2:#4a7c59; --text3:#8aab8a;
+  --danger:#e05a3a; --warn:#d4a843; --success:#2d6a4f;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:'Nunito','Noto Sans KR',sans-serif;font-weight:400;min-height:100vh}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes ticker{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:var(--bg2)}
+::-webkit-scrollbar-thumb{background:var(--accent);border-radius:2px}
 
-  /* HEADER */
-  header{position:sticky;top:0;z-index:100;background:rgba(248,250,248,0.95);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);box-shadow:0 1px 8px rgba(45,106,79,0.08);padding:0 32px;height:64px;display:flex;align-items:center;justify-content:space-between}
-  .logo{display:flex;align-items:baseline;gap:8px;cursor:pointer;text-decoration:none}
-  .logo-text{font-family:'Nunito',sans-serif;font-size:22px;font-weight:900;letter-spacing:0.04em;color:var(--accent);line-height:1.1}
-  .logo-sub{font-family:'Space Mono',monospace;font-size:9px;color:var(--text3);letter-spacing:0.12em;text-transform:uppercase}
-  nav{display:flex;gap:28px;align-items:center}
-  nav a{color:var(--text2);text-decoration:none;font-size:13px;letter-spacing:0.05em;transition:color 0.2s;cursor:pointer}
-  nav a:hover{color:var(--accent)}
-  .header-actions{display:flex;align-items:center;gap:12px}
-  .user-btn{background:var(--surface);border:1px solid var(--border);color:var(--text2);padding:7px 16px;border-radius:2px;font-family:'Space Mono',monospace;font-size:11px;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;gap:6px}
-  .user-btn:hover,.user-btn.logged{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
-  .cart-btn{position:relative;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 18px;border-radius:2px;font-family:'Space Mono',monospace;font-size:12px;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;gap:8px}
-  .cart-btn:hover{background:var(--accent-dim);border-color:var(--accent);color:var(--accent)}
-  .cart-count{background:var(--accent);color:var(--bg);width:18px;height:18px;border-radius:50%;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center}
+/* HEADER */
+header{position:sticky;top:0;z-index:100;background:rgba(248,250,248,0.95);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);padding:0 32px;height:60px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 1px 8px rgba(45,106,79,0.08)}
+.logo{display:flex;align-items:baseline;gap:8px;cursor:pointer;text-decoration:none}
+.logo-text{font-family:'Nunito',sans-serif;font-size:22px;font-weight:900;letter-spacing:0.04em;color:var(--accent)}
+.logo-sub{font-family:'Space Mono',monospace;font-size:9px;color:var(--text3);letter-spacing:0.12em;text-transform:uppercase}
+nav{display:flex;gap:24px;align-items:center}
+nav a{color:var(--text2);text-decoration:none;font-size:13px;cursor:pointer;transition:color 0.2s;font-weight:600}
+nav a:hover{color:var(--accent)}
+.header-actions{display:flex;align-items:center;gap:10px}
+.user-btn{background:var(--surface);border:1px solid var(--border);color:var(--text2);padding:7px 14px;border-radius:20px;font-size:12px;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;gap:6px;font-weight:600}
+.user-btn:hover,.user-btn.logged{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
+.cart-btn{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:20px;font-size:12px;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;gap:8px;font-weight:700}
+.cart-btn:hover{background:var(--accent2)}
+.cart-count{background:#fff;color:var(--accent);width:18px;height:18px;border-radius:50%;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center}
+.hamburger{display:none;flex-direction:column;gap:5px;cursor:pointer;padding:6px;background:none;border:none}
+.hamburger span{display:block;width:22px;height:2px;background:var(--text);border-radius:2px}
 
-  /* USER DROPDOWN */
-  .user-menu-wrap{position:relative}
-  .user-dropdown{position:absolute;top:calc(100% + 8px);right:0;background:var(--surface2);border:1px solid var(--border);border-radius:4px;min-width:190px;z-index:200;animation:fadeIn 0.15s ease;display:none;box-shadow:0 8px 32px rgba(0,0,0,0.4)}
-  .user-dropdown.open{display:block}
-  .user-dropdown-header{padding:14px 16px;border-bottom:1px solid var(--border)}
-  .user-dropdown-name{font-size:13px;font-weight:500;color:var(--text)}
-  .user-dropdown-email{font-size:11px;color:var(--text3);margin-top:2px}
-  .user-dropdown a{display:block;padding:11px 16px;font-size:13px;color:var(--text2);text-decoration:none;cursor:pointer;transition:all 0.15s;border-bottom:1px solid rgba(30,45,69,0.5)}
-  .user-dropdown a:last-child{border-bottom:none}
-  .user-dropdown a:hover{background:var(--accent-dim);color:var(--accent)}
-  .user-dropdown a.danger:hover{background:rgba(224,90,58,0.1);color:var(--danger)}
+/* USER DROPDOWN */
+.user-menu-wrap{position:relative}
+.user-dropdown{position:absolute;top:calc(100% + 8px);right:0;background:var(--surface);border:1px solid var(--border);border-radius:12px;min-width:190px;z-index:200;display:none;box-shadow:0 8px 32px rgba(45,106,79,0.15);animation:fadeIn 0.15s ease}
+.user-dropdown.open{display:block}
+.user-dropdown-header{padding:14px 16px;border-bottom:1px solid var(--border)}
+.user-dropdown-name{font-size:13px;font-weight:700;color:var(--text)}
+.user-dropdown-email{font-size:11px;color:var(--text3);margin-top:2px}
+.user-dropdown a{display:block;padding:11px 16px;font-size:13px;color:var(--text2);cursor:pointer;transition:all 0.15s;border-bottom:1px solid rgba(200,220,200,0.3);font-weight:600}
+.user-dropdown a:last-child{border-bottom:none}
+.user-dropdown a:hover{background:var(--accent-dim);color:var(--accent)}
+.user-dropdown a.danger:hover{background:rgba(224,90,58,0.08);color:var(--danger)}
 
-  /* HERO */
-  .hero{height:520px;position:relative;overflow:hidden;display:flex;align-items:center;border-bottom:1px solid var(--border)}
-  .hero-bg{position:absolute;inset:0;background:radial-gradient(ellipse 60% 80% at 70% 50%,rgba(45,106,79,0.15) 0%,transparent 60%),radial-gradient(ellipse 40% 60% at 20% 80%,rgba(64,145,108,0.10) 0%,transparent 50%),linear-gradient(135deg,#e8f5e9 0%,#f1f8f1 100%)}
-  .hero-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(45,106,79,0.10) 1px,transparent 1px),linear-gradient(90deg,rgba(45,106,79,0.10) 1px,transparent 1px);background-size:48px 48px;opacity:0.3;mask-image:radial-gradient(ellipse at 70% 50%,black 20%,transparent 70%)}
-  .hero-content{position:relative;z-index:2;padding:0 64px;max-width:640px}
-  .hero-eyebrow{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:0.2em;color:var(--accent);text-transform:uppercase;margin-bottom:16px;display:flex;align-items:center;gap:12px}
-  .hero-eyebrow::before{content:'';display:block;width:32px;height:1px;background:var(--accent)}
-  .hero-title{font-family:'Nunito',sans-serif;font-size:clamp(52px,7.5vw,88px);font-weight:900;line-height:0.92;letter-spacing:0.02em;color:var(--text);margin-bottom:24px;text-shadow:0 2px 8px rgba(45,106,79,0.1)}
-  .hero-title span{color:var(--accent)}
-  .hero-desc{font-size:15px;line-height:1.7;color:var(--text2);margin-bottom:36px;max-width:440px}
-  .hero-cta{display:flex;gap:14px;align-items:center}
-  .btn-primary{background:var(--accent);color:var(--bg);border:none;padding:13px 28px;font-family:'Space Mono',monospace;font-size:12px;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;border-radius:2px;transition:all 0.2s;font-weight:700}
-  .btn-primary:hover{background:var(--accent2);transform:translateY(-1px)}
-  .btn-secondary{background:transparent;color:var(--text2);border:1px solid var(--border);padding:13px 28px;font-family:'Space Mono',monospace;font-size:12px;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;border-radius:2px;transition:all 0.2s;text-decoration:none;display:inline-block}
-  .btn-secondary:hover{border-color:var(--accent);color:var(--accent)}
+/* MOBILE NAV */
+.mobile-nav{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(27,58,45,0.97);z-index:600;flex-direction:column;align-items:center;justify-content:center;gap:24px}
+.mobile-nav.open{display:flex}
+.mobile-nav a{font-family:'Nunito',sans-serif;font-weight:900;font-size:32px;color:rgba(255,255,255,0.8);cursor:pointer;transition:color 0.2s}
+.mobile-nav a:hover{color:#fff}
+.mobile-nav-close{position:absolute;top:20px;right:20px;background:none;border:none;color:rgba(255,255,255,0.7);font-size:28px;cursor:pointer}
 
-  /* TICKER */
-  .ticker-wrap{border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--accent);overflow:hidden;height:36px;display:flex;align-items:center}
-  .ticker{display:flex;animation:ticker 30s linear infinite;white-space:nowrap}
-  .ticker-item{font-family:'Space Mono',monospace;font-size:11px;color:rgba(255,255,255,0.85);padding:0 32px;letter-spacing:0.1em}
-  .ticker-item span{color:#ffffff;font-weight:700}
+/* TICKER */
+.ticker-wrap{background:var(--accent);overflow:hidden;height:34px;display:flex;align-items:center}
+.ticker{display:flex;animation:ticker 30s linear infinite;white-space:nowrap}
+.ticker-item{font-family:'Space Mono',monospace;font-size:10px;color:rgba(255,255,255,0.85);padding:0 24px;letter-spacing:0.1em}
+.ticker-item b{color:#fff}
 
-  /* PRODUCTS */
-  .section{padding:80px 64px}
-  .section-header{display:flex;align-items:baseline;gap:16px;margin-bottom:40px}
-  .section-title{font-family:'Nunito',sans-serif;font-size:32px;font-weight:900;letter-spacing:0.02em;color:var(--text)}
-  .section-count{font-family:'Space Mono',monospace;font-size:11px;color:var(--text3)}
-  .filter-bar{display:flex;gap:8px;margin-bottom:32px;align-items:center;flex-wrap:wrap}
-  .filter-btn{background:transparent;border:1px solid var(--border);color:var(--text3);padding:7px 18px;font-size:12px;font-family:'Space Mono',monospace;cursor:pointer;border-radius:2px;transition:all 0.2s;letter-spacing:0.05em}
-  .filter-btn.active,.filter-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
-  .sort-select{margin-left:auto;background:var(--surface);border:1px solid var(--border);color:var(--text2);padding:7px 12px;font-size:12px;font-family:'Space Mono',monospace;border-radius:2px;cursor:pointer;outline:none}
-  .product-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:24px}
-  .product-card{background:var(--surface);border:1px solid var(--border);border-radius:4px;overflow:hidden;cursor:pointer;transition:all 0.3s}
-  .product-card:hover{border-color:var(--accent);transform:translateY(-4px);box-shadow:0 12px 40px rgba(45,106,79,0.15)}
-  .product-img-wrap{position:relative;aspect-ratio:1;overflow:hidden;background:var(--bg3);display:flex;align-items:center;justify-content:center}
-  .product-emoji{font-size:80px;opacity:0.8}
-  .product-badge{position:absolute;top:12px;left:12px;font-family:'Space Mono',monospace;font-size:10px;letter-spacing:0.1em;padding:4px 10px;border-radius:2px;font-weight:700}
-  .badge-new{background:var(--accent);color:var(--bg)}.badge-best{background:var(--warn);color:var(--bg)}.badge-sale{background:var(--danger);color:#fff}
-  .quick-add{position:absolute;bottom:0;left:0;right:0;background:var(--accent);color:var(--bg);border:none;padding:10px;font-family:'Space Mono',monospace;font-size:11px;letter-spacing:0.08em;cursor:pointer;transform:translateY(100%);transition:transform 0.25s}
-  .product-card:hover .quick-add{transform:translateY(0)}
-  .product-info{padding:18px}
-  .product-category{font-family:'Space Mono',monospace;font-size:10px;color:var(--accent);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:6px}
-  .product-name{font-size:14px;font-weight:500;color:var(--text);margin-bottom:12px;line-height:1.4}
-  .product-footer{display:flex;justify-content:space-between;align-items:flex-end}
-  .product-price{font-family:'Space Mono',monospace;font-size:15px;color:var(--accent)}
-  .product-price-orig{font-family:'Space Mono',monospace;font-size:11px;color:var(--text3);text-decoration:line-through;margin-left:6px}
-  .product-stars{font-size:11px;color:var(--warn)}.product-stars span{color:var(--text3);font-size:10px}
+/* HERO */
+.hero{height:480px;position:relative;overflow:hidden;display:flex;align-items:center;border-bottom:1px solid var(--border)}
+.hero-bg{position:absolute;inset:0;background:radial-gradient(ellipse 60% 80% at 70% 50%,rgba(45,106,79,0.15) 0%,transparent 60%),linear-gradient(135deg,#e8f5e9 0%,#f1f8f1 100%)}
+.hero-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(45,106,79,0.08) 1px,transparent 1px),linear-gradient(90deg,rgba(45,106,79,0.08) 1px,transparent 1px);background-size:48px 48px;opacity:0.4}
+.hero-content{position:relative;z-index:2;padding:0 64px;max-width:640px}
+.hero-eyebrow{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:0.2em;color:var(--accent);text-transform:uppercase;margin-bottom:16px;display:flex;align-items:center;gap:12px}
+.hero-eyebrow::before{content:'';display:block;width:32px;height:2px;background:var(--accent);border-radius:2px}
+.hero-title{font-family:'Nunito',sans-serif;font-size:clamp(48px,7vw,80px);line-height:1;font-weight:900;color:var(--text);margin-bottom:20px}
+.hero-title span{color:var(--accent)}
+.hero-desc{font-size:15px;line-height:1.7;color:var(--text2);margin-bottom:32px;max-width:440px}
+.hero-cta{display:flex;gap:14px;flex-wrap:wrap}
+.btn-primary{background:var(--accent);color:#fff;border:none;padding:13px 28px;font-family:'Nunito',sans-serif;font-size:13px;font-weight:800;cursor:pointer;border-radius:25px;transition:all 0.2s}
+.btn-primary:hover{background:var(--accent2);transform:translateY(-2px)}
+.btn-secondary{background:transparent;color:var(--accent);border:2px solid var(--accent);padding:11px 26px;font-family:'Nunito',sans-serif;font-size:13px;font-weight:800;cursor:pointer;border-radius:25px;transition:all 0.2s}
+.btn-secondary:hover{background:var(--accent-dim)}
 
-  /* MODALS */
-  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:300;display:none;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
-  .modal-overlay.open{display:flex}
-  .product-modal{background:var(--surface);border:1px solid var(--border);border-radius:6px;max-width:800px;width:95%;max-height:90vh;overflow-y:auto;animation:fadeIn 0.2s ease}
-  .product-modal-inner{display:grid;grid-template-columns:1fr 1fr}
-  .modal-img{aspect-ratio:1;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:120px;overflow:hidden}
-  .modal-details{padding:36px}
-  .modal-close{float:right;background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer;margin-bottom:16px}
-  .modal-cat{font-family:'Space Mono',monospace;font-size:10px;color:var(--accent);letter-spacing:0.15em;text-transform:uppercase;margin-bottom:8px}
-  .modal-name{font-size:22px;font-weight:700;color:var(--text);margin-bottom:12px}
-  .modal-stars{font-size:13px;color:var(--warn);margin-bottom:16px}.modal-stars span{color:var(--text3);margin-left:6px}
-  .modal-desc{font-size:13px;line-height:1.7;color:var(--text2);margin-bottom:24px}
-  .modal-price-row{display:flex;align-items:baseline;gap:12px;margin-bottom:24px}
-  .modal-price{font-family:'Space Mono',monospace;font-size:24px;color:var(--accent)}
-  .modal-orig{font-family:'Space Mono',monospace;font-size:14px;color:var(--text3);text-decoration:line-through}
-  .qty-row{display:flex;align-items:center;gap:12px;margin-bottom:20px}
-  .qty-label{font-size:12px;color:var(--text3)}
-  .qty-ctrl{display:flex;align-items:center;border:1px solid var(--border);border-radius:2px;overflow:hidden}
-  .qty-ctrl button{background:var(--surface2);border:none;color:var(--text);width:32px;height:32px;font-size:16px;cursor:pointer;transition:background 0.15s}
-  .qty-ctrl button:hover{background:var(--accent-dim);color:var(--accent)}
-  .qty-ctrl input{width:48px;height:32px;text-align:center;background:var(--bg3);border:none;border-left:1px solid var(--border);border-right:1px solid var(--border);color:var(--text);font-family:'Space Mono',monospace;font-size:13px}
-  .modal-add-btn{width:100%;padding:14px;background:var(--accent);color:var(--bg);border:none;font-family:'Space Mono',monospace;font-size:12px;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;border-radius:2px;font-weight:700;transition:all 0.2s}
-  .modal-add-btn:hover{background:var(--accent2)}
-  .reviews-section{padding:32px 36px;border-top:1px solid var(--border)}
-  .reviews-title{font-family:'Space Mono',monospace;font-size:12px;color:var(--text3);letter-spacing:0.1em;margin-bottom:20px}
-  .review-item{padding:16px 0;border-bottom:1px solid var(--border)}.review-item:last-child{border-bottom:none}
-  .review-header{display:flex;align-items:center;gap:12px;margin-bottom:8px}
-  .review-avatar{width:32px;height:32px;border-radius:50%;background:var(--accent-dim);border:1px solid var(--accent);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--accent)}
-  .review-name{font-size:13px;font-weight:500;color:var(--text)}.review-date{font-size:11px;color:var(--text3);margin-top:2px}
-  .review-stars{margin-left:auto;font-size:12px;color:var(--warn)}.review-body{font-size:13px;color:var(--text2);line-height:1.6}
-  .review-form{margin-top:20px;padding-top:20px;border-top:1px solid var(--border)}
-  .review-form-title{font-size:13px;font-weight:500;color:var(--text);margin-bottom:14px}
-  .star-select{display:flex;gap:6px;margin-bottom:12px}.star-select span{font-size:22px;cursor:pointer;color:var(--text3);transition:color 0.15s}.star-select span.active{color:var(--warn)}
-  .review-textarea{width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:2px;font-size:13px;font-family:'Noto Sans KR',sans-serif;resize:vertical;min-height:80px;outline:none;transition:border-color 0.2s}
-  .review-textarea:focus{border-color:var(--accent)}
-  .review-footer{margin-top:10px;display:flex;align-items:center;gap:10px}
-  .like-btn{background:none;border:1.5px solid var(--border);color:var(--text3);padding:5px 12px;border-radius:20px;font-size:12px;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;gap:5px}
-  .like-btn:hover,.like-btn.liked{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
-  .like-count{font-weight:700;color:var(--accent)}
-  .review-img-upload{margin-top:10px;margin-bottom:10px;border:1.5px dashed var(--border);border-radius:6px;padding:10px 14px;cursor:pointer;font-size:12px;color:var(--text3);transition:all 0.2s;display:flex;flex-direction:column;align-items:flex-start}
-  .review-img-upload:hover{border-color:var(--accent);color:var(--accent)}
-  .review-submit{margin-top:10px;background:var(--surface2);border:1px solid var(--border);color:var(--text2);padding:9px 20px;font-size:12px;font-family:'Space Mono',monospace;cursor:pointer;border-radius:2px;transition:all 0.2s}
-  .review-submit:hover{border-color:var(--accent);color:var(--accent)}
+/* SECTION */
+.section{padding:64px 64px}
+.section-header{display:flex;align-items:baseline;gap:16px;margin-bottom:32px}
+.section-title{font-family:'Nunito',sans-serif;font-size:28px;font-weight:900;color:var(--text)}
+.section-count{font-family:'Space Mono',monospace;font-size:11px;color:var(--text3)}
+.filter-bar{display:flex;gap:8px;margin-bottom:24px;flex-wrap:wrap;align-items:center}
+.filter-btn{background:transparent;border:2px solid var(--border);color:var(--text3);padding:7px 16px;font-size:12px;font-family:'Nunito',sans-serif;font-weight:700;cursor:pointer;border-radius:20px;transition:all 0.2s}
+.filter-btn.active,.filter-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
+.sort-select{margin-left:auto;background:var(--surface);border:2px solid var(--border);color:var(--text2);padding:7px 12px;font-size:12px;border-radius:20px;cursor:pointer;outline:none;font-family:'Nunito',sans-serif;font-weight:600}
 
-  /* CART */
-  .cart-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:200;display:none}
-  .cart-backdrop.open{display:block}
-  .cart-panel{position:fixed;right:0;top:0;bottom:0;width:380px;background:var(--surface);border-left:1px solid var(--border);box-shadow:-4px 0 20px rgba(45,106,79,0.08);z-index:201;display:flex;flex-direction:column;transform:translateX(100%);transition:transform 0.3s ease}
-  .cart-panel.open{transform:translateX(0)}
-  .cart-header{padding:24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
-  .cart-title{font-family:'Nunito',sans-serif;font-size:20px;font-weight:800;letter-spacing:0.02em;color:var(--text)}
-  .cart-close{background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer}
-  .cart-items{flex:1;overflow-y:auto;padding:16px}
-  .cart-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:200px;color:var(--text3);font-size:13px;gap:12px}
-  .cart-item{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
-  .cart-item-img{width:64px;height:64px;background:var(--bg3);border-radius:2px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:28px;overflow:hidden}
-  .cart-item-info{flex:1}.cart-item-name{font-size:13px;font-weight:500;color:var(--text);margin-bottom:4px}
-  .cart-item-price{font-family:'Space Mono',monospace;font-size:12px;color:var(--accent)}.cart-item-qty{font-size:11px;color:var(--text3);margin-top:4px}
-  .cart-item-remove{background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:4px}.cart-item-remove:hover{color:var(--danger)}
-  .cart-footer{padding:20px;border-top:1px solid var(--border)}
-  .cart-total-row{display:flex;justify-content:space-between;margin-bottom:16px;font-family:'Space Mono',monospace;font-size:13px}
-  .cart-total-label{color:var(--text3)}.cart-total-val{color:var(--accent)}
-  .checkout-btn{width:100%;padding:14px;background:var(--accent);color:var(--bg);border:none;font-family:'Space Mono',monospace;font-size:12px;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;border-radius:2px;font-weight:700;transition:all 0.2s}
-  .checkout-btn:hover{background:var(--accent2)}
+/* PRODUCT GRID */
+.product-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:20px}
+.product-card{background:var(--surface);border:2px solid var(--border);border-radius:16px;overflow:hidden;cursor:pointer;transition:all 0.3s}
+.product-card:hover{border-color:var(--accent);transform:translateY(-4px);box-shadow:0 12px 40px rgba(45,106,79,0.15)}
+.product-img-wrap{position:relative;aspect-ratio:1;overflow:hidden;background:var(--bg3);display:flex;align-items:center;justify-content:center}
+.product-img-wrap img{width:100%;height:100%;object-fit:cover}
+.product-emoji{font-size:72px}
+.product-badge{position:absolute;top:10px;left:10px;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:0.1em;padding:4px 10px;border-radius:12px;font-weight:700}
+.badge-new{background:var(--accent);color:#fff}
+.badge-best{background:var(--warn);color:#fff}
+.badge-sale{background:var(--danger);color:#fff}
+.quick-add{position:absolute;bottom:0;left:0;right:0;background:var(--accent);color:#fff;border:none;padding:10px;font-family:'Nunito',sans-serif;font-size:12px;font-weight:800;cursor:pointer;transform:translateY(100%);transition:transform 0.25s}
+.product-card:hover .quick-add{transform:translateY(0)}
+.product-info{padding:16px}
+.product-category{font-family:'Space Mono',monospace;font-size:9px;color:var(--accent);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:6px}
+.product-name{font-size:14px;font-weight:700;color:var(--text);margin-bottom:10px;line-height:1.4}
+.product-footer{display:flex;justify-content:space-between;align-items:flex-end}
+.product-price{font-family:'Space Mono',monospace;font-size:14px;color:var(--accent);font-weight:700}
+.product-price-orig{font-size:11px;color:var(--text3);text-decoration:line-through;margin-left:4px}
+.product-stars{font-size:11px;color:var(--warn)}
+.product-stars span{color:var(--text3);font-size:10px}
 
-  /* CHECKOUT */
-  .checkout-modal{background:var(--surface);border:1px solid var(--border);border-radius:6px;max-width:500px;width:95%;max-height:90vh;overflow-y:auto;animation:fadeIn 0.2s}
-  .checkout-header{padding:28px 28px 0;display:flex;justify-content:space-between;align-items:center}
-  .checkout-title{font-family:'Nunito',sans-serif;font-size:22px;font-weight:800;letter-spacing:0.02em}
-  .checkout-body{padding:28px}
-  .checkout-label{font-size:11px;color:var(--text3);letter-spacing:0.1em;margin-bottom:8px;font-family:'Space Mono',monospace}
-  .checkout-input{width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:11px 14px;border-radius:2px;font-size:13px;font-family:'Noto Sans KR',sans-serif;outline:none;transition:border-color 0.2s;margin-bottom:16px}
-  .checkout-input:focus{border-color:var(--accent)}
-  .pay-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:24px}
-  .pay-btn{padding:13px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);border-radius:2px;cursor:pointer;font-size:13px;transition:all 0.2s;text-align:center}
-  .pay-btn.active,.pay-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
-  .checkout-total-row{display:flex;justify-content:space-between;padding:16px 0;border-top:1px solid var(--border);font-family:'Space Mono',monospace;font-size:15px;margin-bottom:20px}
-  .complete-btn{width:100%;padding:14px;background:var(--accent);color:var(--bg);border:none;font-family:'Space Mono',monospace;font-size:12px;letter-spacing:0.1em;cursor:pointer;border-radius:2px;font-weight:700;transition:all 0.2s}
-  .complete-btn:hover{background:var(--accent2)}
+/* MODAL */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:300;display:none;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
+.modal-overlay.open{display:flex}
+.product-modal{background:var(--surface);border:2px solid var(--border);border-radius:20px;max-width:800px;width:95%;max-height:90vh;overflow-y:auto;animation:fadeIn 0.2s}
+.product-modal-inner{display:grid;grid-template-columns:1fr 1fr}
+.modal-img{aspect-ratio:1;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:100px;overflow:hidden;border-radius:18px 0 0 0}
+.modal-img img{width:100%;height:100%;object-fit:cover}
+.modal-details{padding:32px}
+.modal-close{float:right;background:var(--bg2);border:none;color:var(--text3);font-size:18px;cursor:pointer;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin-bottom:16px}
+.modal-close:hover{background:var(--border);color:var(--text)}
+.modal-cat{font-family:'Space Mono',monospace;font-size:9px;color:var(--accent);letter-spacing:0.15em;text-transform:uppercase;margin-bottom:6px}
+.modal-name{font-size:20px;font-weight:800;color:var(--text);margin-bottom:10px}
+.modal-stars{font-size:13px;color:var(--warn);margin-bottom:14px}
+.modal-stars span{color:var(--text3);margin-left:6px;font-size:12px}
+.modal-desc{font-size:13px;line-height:1.7;color:var(--text2);margin-bottom:20px}
+.modal-price-row{display:flex;align-items:baseline;gap:10px;margin-bottom:20px}
+.modal-price{font-family:'Space Mono',monospace;font-size:22px;color:var(--accent);font-weight:700}
+.modal-orig{font-size:13px;color:var(--text3);text-decoration:line-through}
+.qty-row{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.qty-label{font-size:12px;color:var(--text3);font-weight:600}
+.qty-ctrl{display:flex;align-items:center;border:2px solid var(--border);border-radius:25px;overflow:hidden}
+.qty-ctrl button{background:var(--bg2);border:none;color:var(--text);width:36px;height:36px;font-size:16px;cursor:pointer;font-weight:700}
+.qty-ctrl button:hover{background:var(--accent-dim);color:var(--accent)}
+.qty-ctrl input{width:44px;height:36px;text-align:center;background:#fff;border:none;border-left:2px solid var(--border);border-right:2px solid var(--border);color:var(--text);font-size:13px;font-weight:700}
+.modal-add-btn{width:100%;padding:14px;background:var(--accent);color:#fff;border:none;font-family:'Nunito',sans-serif;font-size:14px;font-weight:800;cursor:pointer;border-radius:25px;transition:all 0.2s}
+.modal-add-btn:hover{background:var(--accent2)}
 
-  /* AUTH */
-  .auth-modal{background:var(--surface);border:1px solid var(--border);border-radius:6px;max-width:440px;width:95%;animation:fadeIn 0.2s}
-  .auth-header{padding:32px 32px 0;text-align:center}
-  .auth-logo{font-family:'Nunito',sans-serif;font-size:28px;font-weight:900;color:var(--accent);letter-spacing:0.04em;margin-bottom:6px}
-  .auth-tabs{display:flex;border-bottom:1px solid var(--border);margin-top:24px}
-  .auth-tab{flex:1;padding:14px;text-align:center;cursor:pointer;font-size:13px;color:var(--text3);border-bottom:2px solid transparent;transition:all 0.2s;font-family:'Space Mono',monospace;letter-spacing:0.08em}
-  .auth-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
-  .auth-body{padding:28px 32px 32px}
-  .auth-label{font-size:11px;color:var(--text3);letter-spacing:0.1em;margin-bottom:6px;font-family:'Space Mono',monospace;display:block}
-  .auth-input{width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:12px 14px;border-radius:2px;font-size:13px;font-family:'Noto Sans KR',sans-serif;outline:none;transition:border-color 0.2s;margin-bottom:16px}
-  .auth-input:focus{border-color:var(--accent)}
-  .auth-error{font-size:11px;color:var(--danger);margin-bottom:12px;display:none}
-  .auth-error.show{display:block}
-  .auth-submit{width:100%;padding:14px;background:var(--accent);color:var(--bg);border:none;font-family:'Space Mono',monospace;font-size:12px;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;border-radius:2px;font-weight:700;transition:all 0.2s;margin-top:4px}
-  .auth-submit:hover{background:var(--accent2)}
-  .google-btn{width:100%;padding:13px;background:var(--surface2);border:1px solid var(--border);color:var(--text2);font-size:13px;cursor:pointer;border-radius:2px;transition:all 0.2s;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:8px}
-  .google-btn:hover{border-color:var(--accent);color:var(--accent)}
-  .auth-agree{display:flex;align-items:flex-start;gap:10px;margin-bottom:16px;font-size:12px;color:var(--text2)}
-  .auth-agree input{margin-top:2px;accent-color:var(--accent);cursor:pointer}
-  .auth-divider{text-align:center;color:var(--text3);font-size:11px;margin:16px 0;position:relative}
-  .auth-divider::before,.auth-divider::after{content:'';position:absolute;top:50%;width:calc(50% - 30px);height:1px;background:var(--border)}
-  .auth-divider::before{left:0}.auth-divider::after{right:0}
+/* REVIEWS */
+.reviews-section{padding:28px 32px;border-top:2px solid var(--border)}
+.reviews-title{font-family:'Space Mono',monospace;font-size:11px;color:var(--text3);letter-spacing:0.1em;margin-bottom:16px}
+.review-item{padding:14px 0;border-bottom:1px solid var(--border)}
+.review-item:last-child{border-bottom:none}
+.review-header{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.review-avatar{width:32px;height:32px;border-radius:50%;background:var(--accent-dim);border:2px solid var(--accent);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:var(--accent)}
+.review-name{font-size:13px;font-weight:700;color:var(--text)}
+.review-date{font-size:11px;color:var(--text3)}
+.review-stars{margin-left:auto;font-size:12px;color:var(--warn)}
+.review-body{font-size:13px;color:var(--text2);line-height:1.6}
+.review-footer{margin-top:8px}
+.like-btn{background:none;border:1.5px solid var(--border);color:var(--text3);padding:4px 12px;border-radius:20px;font-size:12px;cursor:pointer;transition:all 0.2s;font-weight:600}
+.like-btn:hover,.like-btn.liked{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
+.like-count{font-weight:800;color:var(--accent)}
+.review-form-wrap{margin-top:16px;padding-top:16px;border-top:1px solid var(--border)}
+.review-form-title{font-size:13px;font-weight:700;color:var(--text);margin-bottom:12px}
+.star-select{display:flex;gap:4px;margin-bottom:10px}
+.star-select span{font-size:24px;cursor:pointer;color:var(--border);transition:color 0.15s}
+.star-select span.active{color:var(--warn)}
+.review-textarea{width:100%;background:var(--bg2);border:2px solid var(--border);color:var(--text);padding:10px 12px;border-radius:12px;font-size:13px;font-family:'Noto Sans KR',sans-serif;resize:vertical;min-height:80px;outline:none;transition:border-color 0.2s}
+.review-textarea:focus{border-color:var(--accent)}
+.review-img-upload{margin-top:8px;margin-bottom:8px;border:2px dashed var(--border);border-radius:12px;padding:10px 14px;cursor:pointer;font-size:12px;color:var(--text3);transition:all 0.2s;font-weight:600}
+.review-img-upload:hover{border-color:var(--accent);color:var(--accent)}
+.review-submit{margin-top:8px;background:var(--surface2);border:2px solid var(--border);color:var(--text2);padding:8px 20px;font-size:12px;font-family:'Nunito',sans-serif;font-weight:700;cursor:pointer;border-radius:20px;transition:all 0.2s}
+.review-submit:hover{border-color:var(--accent);color:var(--accent)}
 
-  /* NOTICE */
-  .notice-section{padding:60px 64px;border-top:1px solid var(--border)}
-  .board-table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:4px;overflow:hidden}
-  .board-header{display:flex;align-items:center;gap:16px;padding:14px 16px;border-bottom:1px solid var(--border);background:var(--bg2)}
-  .board-header-num,.board-num{font-family:'Space Mono',monospace;font-size:10px;color:var(--text3);width:36px}
-  .board-header-title{flex:1;font-family:'Space Mono',monospace;font-size:10px;color:var(--text3)}
-  .board-header-author,.board-author{font-family:'Space Mono',monospace;font-size:10px;color:var(--text3);width:80px;text-align:center}
-  .board-header-date,.board-date{font-family:'Space Mono',monospace;font-size:10px;color:var(--text3);width:90px;text-align:right}
-  .board-item{display:flex;align-items:center;gap:16px;padding:14px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s}
-  .board-item:last-child{border-bottom:none}.board-item:hover{background:var(--accent-dim)}
-  .board-title{flex:1;font-size:14px;color:var(--text)}
-  .board-badge{font-family:'Space Mono',monospace;font-size:9px;padding:2px 7px;background:var(--accent);color:var(--bg);border-radius:2px;margin-left:8px}
+/* CART */
+.cart-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:200;display:none}
+.cart-backdrop.open{display:block}
+.cart-panel{position:fixed;right:0;top:0;bottom:0;width:380px;background:var(--surface);border-left:2px solid var(--border);z-index:201;display:flex;flex-direction:column;transform:translateX(100%);transition:transform 0.3s ease;box-shadow:-4px 0 20px rgba(45,106,79,0.1)}
+.cart-panel.open{transform:translateX(0)}
+.cart-header{padding:22px;border-bottom:2px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.cart-title{font-family:'Nunito',sans-serif;font-size:20px;font-weight:900;color:var(--text)}
+.cart-close{background:var(--bg2);border:none;color:var(--text3);font-size:16px;cursor:pointer;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.cart-items{flex:1;overflow-y:auto;padding:14px}
+.cart-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:200px;color:var(--text3);font-size:13px;gap:12px}
+.cart-item{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
+.cart-item-img{width:60px;height:60px;background:var(--bg3);border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:26px;overflow:hidden}
+.cart-item-img img{width:100%;height:100%;object-fit:cover;border-radius:10px}
+.cart-item-info{flex:1}
+.cart-item-name{font-size:13px;font-weight:700;color:var(--text);margin-bottom:3px}
+.cart-item-price{font-family:'Space Mono',monospace;font-size:12px;color:var(--accent);font-weight:700}
+.cart-item-qty{font-size:11px;color:var(--text3);margin-top:3px}
+.cart-item-remove{background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:4px}
+.cart-item-remove:hover{color:var(--danger)}
+.cart-footer{padding:18px;border-top:2px solid var(--border)}
+.cart-total-row{display:flex;justify-content:space-between;margin-bottom:14px;font-weight:700}
+.cart-total-label{color:var(--text3);font-size:13px}
+.cart-total-val{color:var(--accent);font-family:'Space Mono',monospace;font-size:14px}
+.checkout-btn{width:100%;padding:14px;background:var(--accent);color:#fff;border:none;font-family:'Nunito',sans-serif;font-size:14px;font-weight:800;cursor:pointer;border-radius:25px;transition:all 0.2s}
+.checkout-btn:hover{background:var(--accent2)}
 
-  /* NOTICE VIEW */
-  .notice-view-modal{background:var(--surface);border:1px solid var(--border);border-radius:6px;max-width:600px;width:95%;animation:fadeIn 0.2s}
-  .notice-view-header{padding:28px;border-bottom:1px solid var(--border)}
-  .notice-view-title{font-size:20px;font-weight:700;color:var(--text);margin-bottom:8px}
-  .notice-view-meta{font-size:12px;color:var(--text3)}
-  .notice-view-body{padding:28px;font-size:14px;color:var(--text2);line-height:1.8;min-height:120px}
+/* CHECKOUT */
+.checkout-modal{background:var(--surface);border:2px solid var(--border);border-radius:20px;max-width:500px;width:95%;max-height:90vh;overflow-y:auto;animation:fadeIn 0.2s}
+.checkout-header{padding:24px 24px 0;display:flex;justify-content:space-between;align-items:center}
+.checkout-title{font-family:'Nunito',sans-serif;font-size:22px;font-weight:900}
+.checkout-body{padding:24px}
+.checkout-label{font-size:11px;color:var(--text3);letter-spacing:0.08em;margin-bottom:6px;font-family:'Space Mono',monospace;font-weight:700}
+.checkout-input{width:100%;background:var(--bg2);border:2px solid var(--border);color:var(--text);padding:11px 14px;border-radius:12px;font-size:13px;font-family:'Noto Sans KR',sans-serif;outline:none;transition:border-color 0.2s;margin-bottom:14px;font-weight:500}
+.checkout-input:focus{border-color:var(--accent)}
+.pay-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
+.pay-btn{padding:12px;border:2px solid var(--border);background:var(--bg2);color:var(--text2);border-radius:12px;cursor:pointer;font-size:13px;transition:all 0.2s;text-align:center;font-weight:600}
+.pay-btn.active,.pay-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
+.bank-info{background:var(--bg3);border:2px solid var(--accent);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+.bank-info-label{font-size:11px;color:var(--accent);font-weight:800;margin-bottom:6px;font-family:'Space Mono',monospace}
+.bank-info-num{font-size:16px;font-weight:800;color:var(--text);margin-bottom:3px}
+.bank-info-name{font-size:13px;color:var(--text2)}
+.bank-info-note{font-size:11px;color:var(--text3);margin-top:6px}
+.checkout-total-row{display:flex;justify-content:space-between;padding:14px 0;border-top:2px solid var(--border);margin-bottom:16px;font-weight:700}
+.complete-btn{width:100%;padding:14px;background:var(--accent);color:#fff;border:none;font-family:'Nunito',sans-serif;font-size:14px;font-weight:800;cursor:pointer;border-radius:25px;transition:all 0.2s}
+.complete-btn:hover{background:var(--accent2)}
 
-  /* NOTICE WRITE */
-  .notice-modal{background:var(--surface);border:1px solid var(--border);border-radius:6px;max-width:560px;width:95%;animation:fadeIn 0.2s}
-  .notice-modal-header{padding:24px 28px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
-  .notice-modal-title{font-family:'Nunito',sans-serif;font-size:20px;font-weight:800;letter-spacing:0.02em;color:var(--text)}
-  .notice-modal-close{background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer}
-  .notice-modal-body{padding:28px}
+/* AUTH */
+.auth-modal{background:var(--surface);border:2px solid var(--border);border-radius:20px;max-width:440px;width:95%;animation:fadeIn 0.2s}
+.auth-header{padding:28px 28px 0;text-align:center}
+.auth-logo{font-family:'Nunito',sans-serif;font-size:26px;font-weight:900;color:var(--accent);letter-spacing:0.04em;margin-bottom:4px}
+.auth-tabs{display:flex;border-bottom:2px solid var(--border);margin-top:20px}
+.auth-tab{flex:1;padding:13px;text-align:center;cursor:pointer;font-size:13px;color:var(--text3);border-bottom:2px solid transparent;transition:all 0.2s;font-weight:700;margin-bottom:-2px}
+.auth-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.auth-body{padding:24px 28px 28px}
+.auth-label{font-size:11px;color:var(--text3);letter-spacing:0.08em;margin-bottom:6px;font-family:'Space Mono',monospace;display:block;font-weight:700}
+.auth-input{width:100%;background:var(--bg2);border:2px solid var(--border);color:var(--text);padding:12px 14px;border-radius:12px;font-size:13px;font-family:'Noto Sans KR',sans-serif;outline:none;transition:border-color 0.2s;margin-bottom:14px}
+.auth-input:focus{border-color:var(--accent)}
+.auth-error{font-size:12px;color:var(--danger);margin-bottom:10px;display:none;font-weight:600}
+.auth-error.show{display:block}
+.auth-submit{width:100%;padding:13px;background:var(--accent);color:#fff;border:none;font-family:'Nunito',sans-serif;font-size:13px;font-weight:800;cursor:pointer;border-radius:25px;transition:all 0.2s;margin-top:4px}
+.auth-submit:hover{background:var(--accent2)}
+.google-btn{width:100%;padding:12px;background:var(--surface2);border:2px solid var(--border);color:var(--text2);font-size:13px;cursor:pointer;border-radius:25px;transition:all 0.2s;margin-top:8px;font-weight:700}
+.google-btn:hover{border-color:var(--accent);color:var(--accent)}
+.auth-agree{display:flex;align-items:flex-start;gap:10px;margin-bottom:14px;font-size:12px;color:var(--text2);font-weight:600}
+.auth-agree input{margin-top:2px;accent-color:var(--accent);cursor:pointer}
+.auth-divider{text-align:center;color:var(--text3);font-size:11px;margin:14px 0;position:relative;font-weight:600}
+.auth-divider::before,.auth-divider::after{content:'';position:absolute;top:50%;width:calc(50% - 20px);height:1px;background:var(--border)}
+.auth-divider::before{left:0}.auth-divider::after{right:0}
 
-  /* ADMIN */
-  .admin-panel{position:fixed;inset:0;background:var(--bg);z-index:500;display:none;flex-direction:column;overflow:hidden}
-  .admin-panel.open{display:flex}
-  .admin-topbar{height:56px;background:var(--accent);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 24px;gap:16px;flex-shrink:0}
-  .admin-topbar-title{font-family:'Nunito',sans-serif;font-size:20px;font-weight:900;color:#ffffff;letter-spacing:0.02em}
-  .admin-topbar-badge{font-family:'Space Mono',monospace;font-size:10px;background:rgba(255,255,255,0.2);color:#ffffff;padding:3px 8px;border-radius:2px;font-weight:700}
-  .admin-close{margin-left:auto;background:none;border:1px solid rgba(255,255,255,0.3);color:rgba(255,255,255,0.8);padding:7px 16px;border-radius:2px;font-family:'Space Mono',monospace;font-size:11px;cursor:pointer;transition:all 0.2s}
-  .admin-close:hover{border-color:var(--danger);color:var(--danger)}
-  .admin-layout{display:flex;flex:1;overflow:hidden}
-  .admin-sidebar{width:220px;background:var(--bg2);border-right:1px solid var(--border);padding:20px 0;flex-shrink:0;overflow-y:auto}
-  .admin-nav-label{font-family:'Space Mono',monospace;font-size:10px;color:var(--text3);letter-spacing:0.15em;padding:0 20px;margin-bottom:8px;margin-top:16px}
-  .admin-nav-label:first-child{margin-top:0}
-  .admin-nav-item{display:flex;align-items:center;gap:10px;padding:11px 20px;color:var(--text2);cursor:pointer;transition:all 0.15s;font-size:13px;border-left:2px solid transparent}
-  .admin-nav-item:hover{background:var(--accent-dim);color:var(--text)}
-  .admin-nav-item.active{background:var(--accent-dim);color:var(--accent);border-left-color:var(--accent)}
-  .admin-nav-icon{font-size:15px;width:20px;text-align:center}
-  .admin-main{flex:1;overflow-y:auto;padding:32px}
-  .admin-page{display:none}.admin-page.active{display:block;animation:fadeIn 0.2s}
-  .admin-page-title{font-family:'Nunito',sans-serif;font-size:26px;font-weight:900;letter-spacing:0.02em;color:var(--text);margin-bottom:4px}
-  .admin-page-sub{font-size:12px;color:var(--text3);margin-bottom:28px}
-  .admin-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:32px}
-  .stat-card{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:20px}
-  .stat-label{font-size:11px;color:var(--text3);margin-bottom:8px;font-family:'Space Mono',monospace}
-  .stat-value{font-family:'Nunito',sans-serif;font-size:30px;font-weight:900;color:var(--accent);letter-spacing:0.02em}
-  .stat-sub{font-size:11px;color:var(--text3);margin-top:4px}
-  .admin-table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:4px;overflow:hidden}
-  .admin-table{width:100%;border-collapse:collapse}
-  .admin-table th{padding:12px 16px;text-align:left;font-family:'Space Mono',monospace;font-size:10px;color:var(--text3);letter-spacing:0.1em;border-bottom:1px solid var(--border);background:var(--bg2)}
-  .admin-table td{padding:13px 16px;font-size:13px;color:var(--text2);border-bottom:1px solid rgba(30,45,69,0.5)}
-  .admin-table tr:last-child td{border-bottom:none}.admin-table tr:hover td{background:var(--accent-dim);color:var(--text)}
-  .td-name{color:var(--text)!important;font-weight:500}.td-mono{font-family:'Space Mono',monospace;font-size:12px}
-  .status{display:inline-block;padding:3px 10px;border-radius:2px;font-size:10px;font-family:'Space Mono',monospace;letter-spacing:0.05em}
-  .status-active{background:rgba(76,175,125,0.15);color:var(--success);border:1px solid rgba(76,175,125,0.3)}
-  .status-blocked{background:rgba(224,90,58,0.15);color:var(--danger);border:1px solid rgba(224,90,58,0.3)}
-  .status-new{background:rgba(201,149,106,0.15);color:var(--accent);border:1px solid rgba(201,149,106,0.3)}
-  .admin-action-row{display:flex;gap:10px;margin-bottom:20px;align-items:center}
-  .admin-btn{padding:10px 20px;border-radius:2px;font-family:'Space Mono',monospace;font-size:11px;letter-spacing:0.08em;cursor:pointer;transition:all 0.2s;border:1px solid var(--border);color:var(--text2);background:var(--surface)}
-  .admin-btn:hover{border-color:var(--accent);color:var(--accent)}
-  .admin-btn.primary{background:var(--accent);color:var(--bg);border-color:var(--accent)}.admin-btn.primary:hover{background:var(--accent2)}
-  .admin-btn.danger{border-color:var(--danger);color:var(--danger)}.admin-btn.danger:hover{background:rgba(224,90,58,0.1)}
-  .product-form{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:28px}
-  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-  .form-group{display:flex;flex-direction:column;gap:6px}.form-group.full{grid-column:1/-1}
-  .form-label{font-size:11px;color:var(--text3);font-family:'Space Mono',monospace;letter-spacing:0.08em}
-  .form-input,.form-select,.form-textarea{background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:2px;font-size:13px;outline:none;transition:border-color 0.2s;font-family:'Noto Sans KR',sans-serif}
-  .form-input:focus,.form-select:focus,.form-textarea:focus{border-color:var(--accent)}
-  .form-textarea{resize:vertical;min-height:90px}.form-select option{background:var(--surface)}
-  .form-row-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
-  .review-admin-item{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:18px;margin-bottom:12px}
-  .review-admin-header{display:flex;align-items:center;gap:12px;margin-bottom:8px}
-  .review-admin-product{font-size:11px;color:var(--accent);font-family:'Space Mono',monospace}
-  .review-admin-actions{margin-left:auto;display:flex;gap:8px}
-  .review-admin-btn{padding:5px 12px;font-size:11px;font-family:'Space Mono',monospace;border-radius:2px;cursor:pointer;border:1px solid;transition:all 0.2s}
-  .review-admin-btn.delete{border-color:var(--danger);color:var(--danger)}.review-admin-btn.delete:hover{background:rgba(224,90,58,0.15)}
+/* NOTICE */
+.notice-section{padding:48px 64px;border-top:2px solid var(--border)}
+.board-table-wrap{background:var(--surface);border:2px solid var(--border);border-radius:16px;overflow:hidden}
+.board-header-row{display:flex;align-items:center;gap:16px;padding:12px 16px;border-bottom:2px solid var(--border);background:var(--bg2)}
+.board-col-num{font-family:'Space Mono',monospace;font-size:10px;color:var(--text3);width:36px;font-weight:700}
+.board-col-title{flex:1;font-family:'Space Mono',monospace;font-size:10px;color:var(--text3);font-weight:700}
+.board-col-author{font-family:'Space Mono',monospace;font-size:10px;color:var(--text3);width:80px;text-align:center;font-weight:700}
+.board-col-date{font-family:'Space Mono',monospace;font-size:10px;color:var(--text3);width:90px;text-align:right;font-weight:700}
+.board-item{display:flex;align-items:center;gap:16px;padding:14px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s}
+.board-item:last-child{border-bottom:none}
+.board-item:hover{background:var(--accent-dim)}
+.board-num{font-family:'Space Mono',monospace;font-size:11px;color:var(--text3);width:36px}
+.board-title{flex:1;font-size:14px;color:var(--text);font-weight:600}
+.board-badge{font-family:'Space Mono',monospace;font-size:9px;padding:2px 7px;background:var(--accent);color:#fff;border-radius:8px;margin-left:8px}
+.board-author{font-size:12px;color:var(--text3);width:80px;text-align:center}
+.board-date{font-size:11px;color:var(--text3);font-family:'Space Mono',monospace;width:90px;text-align:right}
 
-  /* FOOTER */
-  footer{background:var(--accent);border-top:1px solid var(--border);padding:48px 64px;margin-top:80px}
-  .footer-grid{display:grid;grid-template-columns:2fr 1fr 1fr;gap:48px;margin-bottom:40px}
-  .footer-brand{font-family:'Nunito',sans-serif;font-size:26px;font-weight:900;color:#ffffff;letter-spacing:0.04em;margin-bottom:12px}
-  .footer-desc{font-size:13px;color:rgba(255,255,255,0.7);line-height:1.7;max-width:320px}
-  .footer-col-title{font-family:'Space Mono',monospace;font-size:11px;color:rgba(255,255,255,0.9);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:16px}
-  .footer-link{display:block;font-size:13px;color:rgba(255,255,255,0.65);text-decoration:none;margin-bottom:8px;transition:color 0.2s;cursor:pointer}
-  .footer-link:hover{color:#ffffff}
-  .footer-bottom{border-top:1px solid rgba(255,255,255,0.2);padding-top:24px;display:flex;justify-content:space-between;align-items:center}
-  .footer-copy{font-size:12px;color:rgba(255,255,255,0.6)}.footer-mono{font-family:'Space Mono',monospace;font-size:10px;color:rgba(255,255,255,0.5)}
+/* NOTICE MODALS */
+.notice-view-modal,.notice-write-modal,.inquiry-modal{background:var(--surface);border:2px solid var(--border);border-radius:20px;max-width:600px;width:95%;animation:fadeIn 0.2s}
+.notice-view-header{padding:24px;border-bottom:2px solid var(--border)}
+.notice-view-title{font-size:20px;font-weight:800;color:var(--text);margin-bottom:6px}
+.notice-view-meta{font-size:12px;color:var(--text3)}
+.notice-view-body{padding:24px;font-size:14px;color:var(--text2);line-height:1.8;min-height:100px}
+.modal-action-footer{padding:0 24px 24px;display:flex;justify-content:flex-end}
+.notice-modal-header{padding:20px 24px;border-bottom:2px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.notice-modal-title{font-family:'Nunito',sans-serif;font-size:18px;font-weight:800;color:var(--text)}
+.notice-modal-close{background:var(--bg2);border:none;color:var(--text3);font-size:16px;cursor:pointer;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.notice-modal-body{padding:24px}
+.form-label{font-size:11px;color:var(--text3);font-family:'Space Mono',monospace;display:block;margin-bottom:6px;font-weight:700;letter-spacing:0.08em}
+.form-input,.form-select,.form-textarea{background:var(--bg2);border:2px solid var(--border);color:var(--text);padding:10px 12px;border-radius:10px;font-size:13px;outline:none;transition:border-color 0.2s;font-family:'Noto Sans KR',sans-serif;width:100%}
+.form-input:focus,.form-select:focus,.form-textarea:focus{border-color:var(--accent)}
+.form-textarea{resize:vertical;min-height:90px}
+.form-group{margin-bottom:14px}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.form-grid .form-group.full{grid-column:1/-1}
+.form-row-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
 
-  /* TOAST */
-  .toast{position:fixed;bottom:32px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:12px 24px;border-radius:4px;font-size:13px;z-index:1000;opacity:0;transition:all 0.3s;pointer-events:none;white-space:nowrap}
-  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-  .toast.success{border-color:var(--success);color:var(--success)}.toast.error{border-color:var(--danger);color:var(--danger)}
+/* ADMIN */
+.admin-panel{position:fixed;inset:0;background:var(--bg);z-index:500;display:none;flex-direction:column;overflow:hidden}
+.admin-panel.open{display:flex}
+.admin-topbar{height:54px;background:var(--accent);display:flex;align-items:center;padding:0 22px;gap:14px;flex-shrink:0}
+.admin-topbar-title{font-family:'Nunito',sans-serif;font-size:20px;font-weight:900;color:#fff}
+.admin-topbar-badge{font-size:10px;background:rgba(255,255,255,0.2);color:#fff;padding:3px 8px;border-radius:8px;font-weight:800;font-family:'Space Mono',monospace}
+.admin-close-btn{margin-left:auto;background:none;border:1px solid rgba(255,255,255,0.3);color:rgba(255,255,255,0.9);padding:6px 16px;border-radius:20px;font-family:'Nunito',sans-serif;font-size:12px;font-weight:700;cursor:pointer;transition:all 0.2s}
+.admin-close-btn:hover{background:rgba(255,255,255,0.15)}
+.admin-layout{display:flex;flex:1;overflow:hidden}
+.admin-sidebar{width:210px;background:var(--surface);border-right:2px solid var(--border);padding:16px 0;flex-shrink:0;overflow-y:auto}
+.admin-nav-label{font-family:'Space Mono',monospace;font-size:9px;color:var(--text3);letter-spacing:0.15em;padding:0 18px;margin-bottom:4px;margin-top:14px;font-weight:700}
+.admin-nav-label:first-child{margin-top:0}
+.admin-nav-item{display:flex;align-items:center;gap:10px;padding:10px 18px;color:var(--text2);cursor:pointer;transition:all 0.15s;font-size:13px;border-left:3px solid transparent;font-weight:600}
+.admin-nav-item:hover{background:var(--accent-dim);color:var(--text)}
+.admin-nav-item.active{background:var(--accent-dim);color:var(--accent);border-left-color:var(--accent)}
+.admin-nav-icon{font-size:15px;width:20px;text-align:center}
+.admin-main{flex:1;overflow-y:auto;padding:28px}
+.admin-page{display:none}
+.admin-page.active{display:block;animation:fadeIn 0.2s}
+.admin-page-title{font-family:'Nunito',sans-serif;font-size:26px;font-weight:900;color:var(--text);margin-bottom:4px}
+.admin-page-sub{font-size:12px;color:var(--text3);margin-bottom:24px}
+.admin-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:28px}
+.stat-card{background:var(--surface);border:2px solid var(--border);border-radius:14px;padding:18px}
+.stat-label{font-size:11px;color:var(--text3);margin-bottom:6px;font-family:'Space Mono',monospace;font-weight:700}
+.stat-value{font-family:'Nunito',sans-serif;font-size:30px;font-weight:900;color:var(--accent)}
+.stat-sub{font-size:11px;color:var(--text3);margin-top:3px}
+.admin-table-wrap{background:var(--surface);border:2px solid var(--border);border-radius:14px;overflow:hidden}
+.admin-table{width:100%;border-collapse:collapse}
+.admin-table th{padding:11px 14px;text-align:left;font-family:'Space Mono',monospace;font-size:9px;color:var(--text3);letter-spacing:0.1em;border-bottom:2px solid var(--border);background:var(--bg2);font-weight:700}
+.admin-table td{padding:12px 14px;font-size:13px;color:var(--text2);border-bottom:1px solid rgba(200,220,200,0.4)}
+.admin-table tr:last-child td{border-bottom:none}
+.admin-table tr:hover td{background:var(--accent-dim);color:var(--text)}
+.td-name{color:var(--text)!important;font-weight:700}
+.td-mono{font-family:'Space Mono',monospace;font-size:11px}
+.status{display:inline-block;padding:3px 10px;border-radius:10px;font-size:10px;font-family:'Space Mono',monospace;letter-spacing:0.05em;font-weight:700}
+.status-active{background:rgba(45,106,79,0.12);color:var(--success);border:1px solid rgba(45,106,79,0.3)}
+.status-blocked{background:rgba(224,90,58,0.12);color:var(--danger);border:1px solid rgba(224,90,58,0.3)}
+.status-pending{background:rgba(212,168,67,0.12);color:var(--warn);border:1px solid rgba(212,168,67,0.3)}
+.status-new{background:rgba(45,106,79,0.12);color:var(--accent);border:1px solid rgba(45,106,79,0.3)}
+.admin-action-row{display:flex;gap:10px;margin-bottom:16px;align-items:center}
+.admin-search{flex:1;background:var(--surface);border:2px solid var(--border);color:var(--text);padding:9px 14px;border-radius:12px;font-size:13px;outline:none;transition:border-color 0.2s;font-family:'Noto Sans KR',sans-serif}
+.admin-search:focus{border-color:var(--accent)}
+.admin-btn{padding:9px 18px;border-radius:20px;font-family:'Nunito',sans-serif;font-size:12px;font-weight:700;cursor:pointer;transition:all 0.2s;border:2px solid var(--border);color:var(--text2);background:var(--surface)}
+.admin-btn:hover{border-color:var(--accent);color:var(--accent)}
+.admin-btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.admin-btn.primary:hover{background:var(--accent2)}
+.admin-btn.danger{border-color:var(--danger);color:var(--danger)}
+.admin-btn.danger:hover{background:rgba(224,90,58,0.08)}
+.image-upload-wrap{border:2px dashed var(--border);border-radius:12px;padding:20px;text-align:center;cursor:pointer;transition:all 0.2s;min-height:120px;display:flex;align-items:center;justify-content:center;flex-direction:column}
+.image-upload-wrap:hover,.image-upload-wrap.drag-over{border-color:var(--accent);background:var(--accent-dim)}
+.review-admin-item{background:var(--surface);border:2px solid var(--border);border-radius:12px;padding:16px;margin-bottom:10px}
+.review-admin-header{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.review-admin-product{font-size:11px;color:var(--accent);font-family:'Space Mono',monospace;font-weight:700}
+.review-admin-actions{margin-left:auto}
 
-  /* 이미지 업로드 */
-  .image-upload-wrap{border:2px dashed var(--border);border-radius:4px;padding:20px;text-align:center;cursor:pointer;transition:all 0.2s;min-height:120px;display:flex;align-items:center;justify-content:center;flex-direction:column}
-  .image-upload-wrap.drag-over{border-color:var(--accent);background:var(--accent-dim);transform:scale(1.01)}
-  .image-upload-wrap:hover{border-color:var(--accent);background:var(--accent-dim)}
+/* ORDER STATUS SELECT */
+.order-status-select{background:var(--bg2);border:2px solid var(--border);color:var(--text);padding:5px 8px;border-radius:8px;font-size:11px;cursor:pointer;outline:none;font-family:'Nunito',sans-serif;font-weight:700}
+.order-status-select:focus{border-color:var(--accent)}
 
-  /* 햄버거 메뉴 */
-  .hamburger{display:none;flex-direction:column;gap:5px;cursor:pointer;padding:6px;background:none;border:none}
-  .hamburger span{display:block;width:22px;height:2px;background:var(--text);border-radius:2px;transition:all 0.3s}
-  .mobile-nav{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(27,58,45,0.97);z-index:600;flex-direction:column;align-items:center;justify-content:center;gap:28px}
-  .mobile-nav.open{display:flex}
-  .mobile-nav a{font-family:'Nunito',sans-serif;font-weight:900;font-size:36px;letter-spacing:0.04em;color:var(--text2);text-decoration:none;cursor:pointer;transition:color 0.2s}
-  .mobile-nav a:hover,.mobile-nav a:active{color:var(--accent)}
-  .mobile-nav-close{position:absolute;top:20px;right:20px;background:none;border:none;color:var(--text2);font-size:32px;cursor:pointer;line-height:1}
+/* INQUIRY */
+.inquiry-item{background:var(--surface);border:2px solid var(--border);border-radius:12px;padding:16px;margin-bottom:10px}
+.inquiry-header{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.inquiry-title-text{font-size:14px;font-weight:700;color:var(--text)}
+.inquiry-answer-box{margin-top:12px;padding:12px;background:var(--accent-dim);border-radius:10px;border-left:3px solid var(--accent)}
+.inquiry-answer-label{font-size:10px;color:var(--accent);font-weight:800;margin-bottom:4px;font-family:'Space Mono',monospace}
 
-  /* MOBILE */
-  @media(max-width:768px){
-    header{padding:0 16px;height:56px}
-    nav{display:none !important}
-    .hamburger{display:flex}
-    .logo-text{font-size:18px}
-    .logo-sub{display:none}
-    .user-btn{padding:6px 10px;font-size:10px}
-    #userBtnLabel{display:none}
-    .cart-btn{padding:6px 12px;font-size:11px}
-    .cart-count{width:16px;height:16px;font-size:9px}
+/* TOAST */
+.toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--surface);border:2px solid var(--border);color:var(--text);padding:12px 24px;border-radius:25px;font-size:13px;z-index:1000;opacity:0;transition:all 0.3s;pointer-events:none;white-space:nowrap;font-weight:700;box-shadow:0 4px 20px rgba(45,106,79,0.15)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.success{border-color:var(--success);color:var(--success)}
+.toast.error{border-color:var(--danger);color:var(--danger)}
 
-    .hero{height:auto;min-height:360px;padding:48px 0}
-    .hero-content{padding:0 20px;max-width:100%}
-    .hero-title{font-size:52px}
-    .hero-desc{font-size:13px;margin-bottom:28px}
-    .hero-cta{flex-wrap:wrap;gap:10px}
-    .btn-primary,.btn-secondary{padding:12px 22px;font-size:11px}
+/* FOOTER */
+footer{background:var(--accent);border-top:2px solid var(--border);padding:44px 64px;margin-top:60px}
+.footer-grid{display:grid;grid-template-columns:2fr 1fr 1fr;gap:40px;margin-bottom:32px}
+.footer-brand{font-family:'Nunito',sans-serif;font-size:24px;font-weight:900;color:#fff;margin-bottom:10px}
+.footer-desc{font-size:13px;color:rgba(255,255,255,0.7);line-height:1.7;max-width:300px}
+.footer-col-title{font-family:'Space Mono',monospace;font-size:10px;color:rgba(255,255,255,0.9);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:14px;font-weight:700}
+.footer-link{display:block;font-size:13px;color:rgba(255,255,255,0.65);text-decoration:none;margin-bottom:8px;transition:color 0.2s;cursor:pointer;font-weight:600}
+.footer-link:hover{color:#fff}
+.footer-bottom{border-top:1px solid rgba(255,255,255,0.2);padding-top:20px;display:flex;justify-content:space-between;align-items:center}
+.footer-copy{font-size:12px;color:rgba(255,255,255,0.6)}
+.footer-mono{font-family:'Space Mono',monospace;font-size:10px;color:rgba(255,255,255,0.5)}
 
-    .section{padding:32px 14px}
-    .notice-section{padding:32px 14px}
-    .section-title{font-size:28px}
-    .section-header{margin-bottom:20px}
-
-    .filter-bar{gap:6px;margin-bottom:16px;flex-wrap:wrap}
-    .filter-btn{padding:7px 12px;font-size:11px}
-    .sort-select{font-size:11px;padding:7px 8px;width:100%;margin-top:4px;margin-left:0}
-
-    .product-grid{grid-template-columns:1fr 1fr;gap:10px}
-    .product-img-wrap{aspect-ratio:1}
-    .product-emoji{font-size:44px}
-    .product-info{padding:10px}
-    .product-name{font-size:12px;margin-bottom:6px;line-height:1.3}
-    .product-price{font-size:12px}
-    .product-price-orig{font-size:10px}
-    .product-category{font-size:9px;margin-bottom:4px}
-    .product-stars{font-size:9px}
-    .product-footer{flex-direction:column;align-items:flex-start;gap:2px}
-    .quick-add{font-size:10px;padding:8px}
-
-    .product-modal-inner{grid-template-columns:1fr}
-    .modal-img{aspect-ratio:1;max-height:220px;font-size:72px}
-    .modal-details{padding:18px}
-    .modal-name{font-size:17px}
-    .modal-price{font-size:20px}
-    .reviews-section{padding:18px}
-
-    .cart-panel{width:100%}
-    .modal-overlay{align-items:flex-end}
-    .product-modal{border-radius:16px 16px 0 0;max-height:92vh;width:100%;max-width:100%}
-    .checkout-modal{border-radius:16px 16px 0 0;max-height:90vh;width:100%;max-width:100%}
-    .auth-modal{border-radius:16px 16px 0 0;width:100%;max-width:100%}
-    .notice-view-modal{border-radius:16px 16px 0 0;width:100%;max-width:100%}
-    .notice-modal{border-radius:16px 16px 0 0;width:100%;max-width:100%}
-
-    .admin-sidebar{width:52px;overflow:hidden}
-    .admin-nav-label{display:none}
-    .admin-nav-item span:not(.admin-nav-icon){display:none}
-    .admin-nav-item{padding:14px;justify-content:center}
-    .admin-nav-icon{font-size:18px;width:auto}
-    .admin-stats{grid-template-columns:1fr 1fr}
-    .admin-main{padding:14px}
-    .form-grid{grid-template-columns:1fr}
-
-    footer{padding:28px 16px;margin-top:32px}
-    .footer-grid{grid-template-columns:1fr;gap:20px}
-    .footer-bottom{flex-direction:column;gap:8px;text-align:center}
-
-    .board-author,.board-header-author{display:none}
-    .board-date,.board-header-date{width:70px;font-size:10px}
-    .ticker-item{font-size:10px;padding:0 16px}
-    .user-dropdown{right:-8px}
-  }
-  @media(max-width:380px){
-    .hero-title{font-size:42px}
-    .product-name{font-size:11px}
-  }
+/* RESPONSIVE */
+@media(max-width:768px){
+  header{padding:0 16px;height:56px}
+  nav{display:none!important}
+  .hamburger{display:flex}
+  .logo-text{font-size:18px}
+  .logo-sub{display:none}
+  .user-btn{padding:6px 10px;font-size:10px}
+  #userBtnLabel{display:none}
+  .cart-btn{padding:6px 12px;font-size:11px}
+  .cart-count{width:16px;height:16px;font-size:9px}
+  .hero{height:auto;min-height:360px;padding:48px 0}
+  .hero-content{padding:0 20px;max-width:100%}
+  .hero-title{font-size:48px}
+  .hero-desc{font-size:13px;margin-bottom:24px}
+  .section{padding:32px 14px}
+  .notice-section{padding:32px 14px}
+  .section-title{font-size:22px}
+  .filter-bar{gap:6px;margin-bottom:14px;flex-wrap:wrap}
+  .filter-btn{padding:6px 12px;font-size:11px}
+  .sort-select{width:100%;margin-top:4px;margin-left:0}
+  .product-grid{grid-template-columns:1fr 1fr;gap:10px}
+  .product-emoji{font-size:44px}
+  .product-info{padding:10px}
+  .product-name{font-size:12px}
+  .product-price{font-size:12px}
+  .modal-overlay{align-items:flex-end}
+  .product-modal,.checkout-modal,.auth-modal,.notice-view-modal,.notice-write-modal,.inquiry-modal{border-radius:20px 20px 0 0;width:100%;max-width:100%}
+  .product-modal-inner{grid-template-columns:1fr}
+  .modal-img{aspect-ratio:1;max-height:200px;font-size:72px;border-radius:18px 18px 0 0}
+  .cart-panel{width:100%}
+  .admin-sidebar{width:50px;overflow:hidden}
+  .admin-nav-label{display:none}
+  .admin-nav-item span:not(.admin-nav-icon){display:none}
+  .admin-nav-item{padding:13px;justify-content:center}
+  .admin-nav-icon{font-size:18px;width:auto}
+  .admin-stats{grid-template-columns:1fr 1fr}
+  .admin-main{padding:14px}
+  .form-grid{grid-template-columns:1fr}
+  footer{padding:28px 16px;margin-top:32px}
+  .footer-grid{grid-template-columns:1fr;gap:20px}
+  .footer-bottom{flex-direction:column;gap:8px;text-align:center}
+  .board-col-author,.board-author{display:none}
+  .board-col-date,.board-date{width:70px;font-size:10px}
+}
+@media(max-width:380px){.hero-title{font-size:40px}.product-name{font-size:11px}}
 </style>
 </head>
 <body>
@@ -1054,23 +410,23 @@ async function renderAdminInquiries() {
 <!-- MOBILE NAV -->
 <div class="mobile-nav" id="mobileNav">
   <button class="mobile-nav-close" onclick="closeMobileNav()">✕</button>
-  <a onclick="closeMobileNav();document.getElementById('products').scrollIntoView({behavior:'smooth'})">상품</a>
-  <a onclick="closeMobileNav();document.getElementById('noticeSection').scrollIntoView({behavior:'smooth'})">공지사항</a>
-  <a onclick="closeMobileNav();document.getElementById('products').scrollIntoView({behavior:'smooth'})">리뷰</a>
+  <a onclick="closeMobileNav();scrollToEl('products')">상품</a>
+  <a onclick="closeMobileNav();scrollToEl('noticeSection')">공지사항</a>
+  <a onclick="closeMobileNav();scrollToEl('products')">리뷰</a>
   <a onclick="closeMobileNav();openInquiry()">1:1 문의</a>
 </div>
 
 <!-- HEADER -->
 <header>
   <div class="logo" onclick="window.scrollTo({top:0,behavior:'smooth'})">
-    
     <span class="logo-text">GECKO LAB</span>
     <span class="logo-sub">REPTILE GOODS</span>
   </div>
   <nav>
-    <a onclick="document.getElementById('products').scrollIntoView({behavior:'smooth'})">상품</a>
-    <a onclick="document.getElementById('noticeSection').scrollIntoView({behavior:'smooth'})">공지사항</a>
-    <a onclick="document.getElementById('inquirySection').scrollIntoView({behavior:'smooth'})">1대1 문의</a>
+    <a onclick="scrollToEl('products')">상품</a>
+    <a onclick="scrollToEl('noticeSection')">공지사항</a>
+    <a onclick="scrollToEl('products')">리뷰</a>
+    <a onclick="openInquiry()">1:1 문의</a>
   </nav>
   <button class="hamburger" onclick="openMobileNav()">
     <span></span><span></span><span></span>
@@ -1087,7 +443,7 @@ async function renderAdminInquiries() {
           <div class="user-dropdown-email" id="dropdownEmail">—</div>
         </div>
         <a id="adminMenuLink" onclick="openAdmin()" style="display:none">🛡 관리자 패널</a>
-        <a class="danger" onclick="logout()">로그아웃</a>
+        <a class="danger" onclick="doLogout()">로그아웃</a>
       </div>
     </div>
     <button class="cart-btn" onclick="openCart()">🛒 장바구니 <span class="cart-count" id="cartCount">0</span></button>
@@ -1097,27 +453,28 @@ async function renderAdminInquiries() {
 <!-- TICKER -->
 <div class="ticker-wrap"><div class="ticker">
   <span class="ticker-item">🦎 파충류 전문 3D 프린팅 용품</span>
-  <span class="ticker-item">— <span>FREE SHIPPING</span> 50,000원 이상 무료배송 —</span>
+  <span class="ticker-item">— <b>FREE SHIPPING</b> 50,000원 이상 무료배송 —</span>
   <span class="ticker-item">🌿 자연 친화적 소재 사용</span>
-  <span class="ticker-item">— <span>GECKO LAB</span> 도마뱀의 최적 환경을 —</span>
+  <span class="ticker-item">— <b>GECKO LAB</b> 도마뱀의 최적 환경을 —</span>
   <span class="ticker-item">✨ 레오파드 게코 전문 용품</span>
-  <span class="ticker-item">— <span>MADE IN KOREA</span> 국내 제작 —</span>
+  <span class="ticker-item">— <b>MADE IN KOREA</b> 국내 제작 —</span>
   <span class="ticker-item">🦎 파충류 전문 3D 프린팅 용품</span>
-  <span class="ticker-item">— <span>FREE SHIPPING</span> 50,000원 이상 무료배송 —</span>
+  <span class="ticker-item">— <b>FREE SHIPPING</b> 50,000원 이상 무료배송 —</span>
   <span class="ticker-item">🌿 자연 친화적 소재 사용</span>
-  <span class="ticker-item">— <span>GECKO LAB</span> 도마뱀의 최적 환경을 —</span>
+  <span class="ticker-item">— <b>GECKO LAB</b> 도마뱀의 최적 환경을 —</span>
 </div></div>
 
 <!-- HERO -->
 <section class="hero">
-  <div class="hero-bg"></div><div class="hero-grid"></div>
+  <div class="hero-bg"></div>
+  <div class="hero-grid"></div>
   <div class="hero-content">
     <div class="hero-eyebrow">gecko lab — reptile specialists</div>
     <h1 class="hero-title">YOUR <span>GECKO</span><br>DESERVES<br>THE BEST.</h1>
     <p class="hero-desc">3D 프린팅 기술로 만든 파충류 전용 용품. 게코의 자연 서식환경을 사육장에서 완벽하게 재현합니다.</p>
     <div class="hero-cta">
-      <button class="btn-primary" onclick="document.getElementById('products').scrollIntoView({behavior:'smooth'})">쇼핑하기</button>
-      <button class="btn-secondary" onclick="document.getElementById('noticeSection').scrollIntoView({behavior:'smooth'})">공지사항</button>
+      <button class="btn-primary" onclick="scrollToEl('products')">쇼핑하기</button>
+      <button class="btn-secondary" onclick="scrollToEl('noticeSection')">공지사항</button>
     </div>
   </div>
 </section>
@@ -1147,54 +504,15 @@ async function renderAdminInquiries() {
 <section class="notice-section" id="noticeSection">
   <div class="section-header"><h2 class="section-title">공지사항</h2></div>
   <div class="board-table-wrap">
-    <div class="board-header">
-      <span class="board-header-num">번호</span>
-      <span class="board-header-title">제목</span>
-      <span class="board-header-author">작성자</span>
-      <span class="board-header-date">날짜</span>
+    <div class="board-header-row">
+      <span class="board-col-num">번호</span>
+      <span class="board-col-title">제목</span>
+      <span class="board-col-author">작성자</span>
+      <span class="board-col-date">날짜</span>
     </div>
     <div id="noticeList"></div>
   </div>
 </section>
-
-<!-- 1대1 문의 섹션 -->
-<section class="notice-section" id="inquirySection">
-  <div class="section-header">
-    <h2 class="section-title">1대1 문의</h2>
-  </div>
-  <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
-    <button class="btn-primary" style="font-size:12px;padding:10px 20px" onclick="openInquiryWrite()">✏️ 문의 작성</button>
-  </div>
-  <div class="board-table-wrap">
-    <div class="board-header">
-      <span class="board-header-num">상태</span>
-      <span class="board-header-title">제목</span>
-      <span class="board-header-author">작성자</span>
-      <span class="board-header-date">날짜</span>
-    </div>
-    <div id="inquiryList"><div style="padding:24px;text-align:center;color:var(--text3);font-size:13px;">로그인 후 문의 내역을 확인할 수 있어요.</div></div>
-  </div>
-</section>
-
-<!-- 1대1 문의 모달 -->
-<div class="modal-overlay" id="inquiryModal" onclick="if(event.target===this)closeInquiry()">
-  <div class="notice-modal">
-    <div class="notice-modal-header">
-      <span class="notice-modal-title">1대1 문의</span>
-      <button class="notice-modal-close" onclick="closeInquiry()">✕</button>
-    </div>
-    <div class="notice-modal-body">
-      <label class="form-label" style="display:block;margin-bottom:6px">제목</label>
-      <input class="form-input" id="inquiryTitle" style="width:100%;margin-bottom:16px" placeholder="문의 제목을 입력하세요">
-      <label class="form-label" style="display:block;margin-bottom:6px">내용</label>
-      <textarea class="form-textarea" id="inquiryContent" style="width:100%" rows="5" placeholder="문의 내용을 자세히 입력해주세요"></textarea>
-      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
-        <button class="admin-btn" onclick="closeInquiry()">취소</button>
-        <button class="admin-btn primary" onclick="submitInquiry()">문의 등록</button>
-      </div>
-    </div>
-  </div>
-</div>
 
 <!-- FOOTER -->
 <footer>
@@ -1205,14 +523,14 @@ async function renderAdminInquiries() {
     </div>
     <div>
       <div class="footer-col-title">쇼핑</div>
-      <a class="footer-link">사육환경 용품</a>
-      <a class="footer-link">먹이/영양제</a>
-      <a class="footer-link">악세서리</a>
+      <a class="footer-link" onclick="scrollToEl('products')">사육환경 용품</a>
+      <a class="footer-link" onclick="scrollToEl('products')">먹이/영양제</a>
+      <a class="footer-link" onclick="scrollToEl('products')">악세서리</a>
     </div>
     <div>
       <div class="footer-col-title">고객센터</div>
-      <a class="footer-link" onclick="document.getElementById('noticeSection').scrollIntoView({behavior:'smooth'})">공지사항</a>
-      <a class="footer-link" onclick="document.getElementById('noticeSection').scrollIntoView({behavior:'smooth'})">주문/배송 안내</a>
+      <a class="footer-link" onclick="scrollToEl('noticeSection')">공지사항</a>
+      <a class="footer-link" onclick="scrollToEl('noticeSection')">주문/배송 안내</a>
       <a class="footer-link" onclick="openInquiry()">1:1 문의</a>
     </div>
   </div>
@@ -1222,11 +540,14 @@ async function renderAdminInquiries() {
   </div>
 </footer>
 
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
 <!-- PRODUCT MODAL -->
 <div class="modal-overlay" id="productModal" onclick="if(event.target===this)closeProductModal()">
   <div class="product-modal">
     <div class="product-modal-inner">
-      <div class="modal-img" id="modalImgSection">🦎</div>
+      <div class="modal-img" id="modalImg">🦎</div>
       <div class="modal-details">
         <button class="modal-close" onclick="closeProductModal()">✕</button>
         <div class="modal-cat" id="modalCat"></div>
@@ -1264,7 +585,10 @@ async function renderAdminInquiries() {
     <div class="cart-empty" id="cartEmpty"><span style="font-size:32px">🛒</span><span>장바구니가 비어있어요</span></div>
   </div>
   <div class="cart-footer">
-    <div class="cart-total-row"><span class="cart-total-label">합계</span><span class="cart-total-val" id="cartTotal">₩0</span></div>
+    <div class="cart-total-row">
+      <span class="cart-total-label">합계</span>
+      <span class="cart-total-val" id="cartTotal">₩0</span>
+    </div>
     <button class="checkout-btn" onclick="openCheckout()">주문하기</button>
   </div>
 </div>
@@ -1274,27 +598,33 @@ async function renderAdminInquiries() {
   <div class="checkout-modal">
     <div class="checkout-header">
       <span class="checkout-title">주문 결제</span>
-      <button style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer" onclick="closeCheckout()">✕</button>
+      <button style="background:var(--bg2);border:none;color:var(--text3);font-size:16px;cursor:pointer;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center" onclick="closeCheckout()">✕</button>
     </div>
     <div class="checkout-body">
-      <div class="checkout-label">받으실 분</div>
+      <div class="checkout-label">받으실 분 *</div>
       <input class="checkout-input" id="checkoutName" placeholder="이름" type="text">
-      <div class="checkout-label">연락처</div>
+      <div class="checkout-label">연락처 *</div>
       <input class="checkout-input" id="checkoutPhone" placeholder="010-0000-0000" type="tel">
-      <div class="checkout-label">배송지</div>
+      <div class="checkout-label">배송지 *</div>
       <input class="checkout-input" id="checkoutAddress" placeholder="주소를 입력하세요" type="text">
       <div class="checkout-label">결제 수단</div>
       <div class="pay-grid">
-        <div class="pay-btn active" onclick="selectPay(this)">💳 카드</div>
+        <div class="pay-btn" onclick="selectPay(this)">💳 카드</div>
         <div class="pay-btn" onclick="selectPay(this)">📱 카카오페이</div>
-        <div class="pay-btn" onclick="selectPay(this)">🏦 무통장입금</div>
+        <div class="pay-btn active" onclick="selectPay(this)" id="bankPayBtn">🏦 무통장입금</div>
         <div class="pay-btn" onclick="selectPay(this)">📲 토스</div>
       </div>
-      <div class="checkout-total-row">
-        <span style="color:var(--text2)">최종 결제금액</span>
-        <span style="color:var(--accent)" id="checkoutTotal">₩0</span>
+      <div class="bank-info" id="bankInfoBox">
+        <div class="bank-info-label">💰 무통장 입금 계좌</div>
+        <div class="bank-info-num">카카오뱅크 3333-09-8181573</div>
+        <div class="bank-info-name">예금주: 강영빈</div>
+        <div class="bank-info-note">* 입금 확인 후 배송이 시작됩니다.</div>
       </div>
-      <button class="complete-btn" onclick="completePurchase()">결제 완료</button>
+      <div class="checkout-total-row">
+        <span style="color:var(--text2);font-size:14px">최종 결제금액</span>
+        <span style="color:var(--accent);font-family:'Space Mono',monospace;font-size:16px;font-weight:700" id="checkoutTotal">₩0</span>
+      </div>
+      <button class="complete-btn" onclick="completePurchase()">주문 완료</button>
     </div>
   </div>
 </div>
@@ -1304,7 +634,7 @@ async function renderAdminInquiries() {
   <div class="auth-modal">
     <div class="auth-header">
       <div class="auth-logo">GECKO LAB</div>
-      <div style="font-size:12px;color:var(--text3)">파충류 전문 쇼핑몰</div>
+      <div style="font-size:12px;color:var(--text3);font-weight:600">파충류 전문 쇼핑몰</div>
       <div class="auth-tabs">
         <div class="auth-tab active" id="loginTab" onclick="switchAuthTab('login')">로그인</div>
         <div class="auth-tab" id="registerTab" onclick="switchAuthTab('register')">회원가입</div>
@@ -1316,7 +646,7 @@ async function renderAdminInquiries() {
         <input class="auth-input" id="loginEmail" type="email" placeholder="email@example.com" onkeydown="if(event.key==='Enter')doLogin()">
         <label class="auth-label">비밀번호</label>
         <input class="auth-input" id="loginPassword" type="password" placeholder="비밀번호 입력" onkeydown="if(event.key==='Enter')doLogin()">
-        <div class="auth-error" id="loginError"></div>
+        <div class="auth-error" id="loginError">이메일 또는 비밀번호가 올바르지 않아요.</div>
         <button class="auth-submit" onclick="doLogin()">로그인</button>
         <div class="auth-divider">또는</div>
         <button class="google-btn" onclick="doGoogleLogin()">🌐 Google로 로그인</button>
@@ -1344,29 +674,27 @@ async function renderAdminInquiries() {
 <div class="modal-overlay" id="noticeViewModal" onclick="if(event.target===this)closeNoticeView()">
   <div class="notice-view-modal">
     <div class="notice-view-header">
-      <div class="notice-view-title" id="noticeViewTitle">—</div>
-      <div class="notice-view-meta" id="noticeViewMeta">—</div>
+      <div class="notice-view-title" id="noticeViewTitle"></div>
+      <div class="notice-view-meta" id="noticeViewMeta"></div>
     </div>
-    <div class="notice-view-body" id="noticeViewBody">—</div>
-    <div style="padding:0 28px 28px;display:flex;justify-content:flex-end">
-      <button class="btn-secondary" onclick="closeNoticeView()" style="padding:10px 24px">닫기</button>
+    <div class="notice-view-body" id="noticeViewBody"></div>
+    <div class="modal-action-footer">
+      <button class="btn-secondary" onclick="closeNoticeView()">닫기</button>
     </div>
   </div>
 </div>
 
 <!-- NOTICE WRITE -->
 <div class="modal-overlay" id="noticeWriteModal" onclick="if(event.target===this)closeNoticeWrite()">
-  <div class="notice-modal">
+  <div class="notice-write-modal">
     <div class="notice-modal-header">
       <span class="notice-modal-title">공지사항 작성</span>
       <button class="notice-modal-close" onclick="closeNoticeWrite()">✕</button>
     </div>
     <div class="notice-modal-body">
-      <label class="form-label" style="display:block;margin-bottom:6px">제목</label>
-      <input class="form-input" id="noticeWriteTitle" style="width:100%;margin-bottom:16px" placeholder="공지 제목">
-      <label class="form-label" style="display:block;margin-bottom:6px">내용</label>
-      <textarea class="form-textarea" id="noticeWriteContent" style="width:100%" rows="6" placeholder="공지 내용을 입력하세요"></textarea>
-      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
+      <div class="form-group"><label class="form-label">제목</label><input class="form-input" id="noticeWriteTitle" placeholder="공지 제목"></div>
+      <div class="form-group"><label class="form-label">내용</label><textarea class="form-textarea" id="noticeWriteContent" rows="5" placeholder="공지 내용을 입력하세요"></textarea></div>
+      <div class="form-row-actions">
         <button class="admin-btn" onclick="closeNoticeWrite()">취소</button>
         <button class="admin-btn primary" onclick="submitNotice()">등록</button>
       </div>
@@ -1374,71 +702,50 @@ async function renderAdminInquiries() {
   </div>
 </div>
 
-<!-- 문의 작성 모달 -->
-<div class="modal-overlay" id="inquiryWriteModal" onclick="if(event.target===this)closeInquiryWrite()">
-  <div class="notice-modal">
+<!-- 1대1 문의 -->
+<div class="modal-overlay" id="inquiryModal" onclick="if(event.target===this)closeInquiry()">
+  <div class="inquiry-modal">
     <div class="notice-modal-header">
-      <span class="notice-modal-title">1대1 문의 작성</span>
-      <button class="notice-modal-close" onclick="closeInquiryWrite()">✕</button>
+      <span class="notice-modal-title">1대1 문의</span>
+      <button class="notice-modal-close" onclick="closeInquiry()">✕</button>
     </div>
     <div class="notice-modal-body">
-      <label class="form-label" style="display:block;margin-bottom:6px">제목</label>
-      <input class="form-input" id="inquiryTitle" style="width:100%;margin-bottom:16px" placeholder="문의 제목을 입력하세요">
-      <label class="form-label" style="display:block;margin-bottom:6px">내용</label>
-      <textarea class="form-textarea" id="inquiryContent" style="width:100%" rows="6" placeholder="문의 내용을 자세히 입력해주세요"></textarea>
-      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
-        <button class="admin-btn" onclick="closeInquiryWrite()">취소</button>
+      <div class="form-group"><label class="form-label">제목</label><input class="form-input" id="inquiryTitle" placeholder="문의 제목"></div>
+      <div class="form-group"><label class="form-label">내용</label><textarea class="form-textarea" id="inquiryContent" rows="5" placeholder="문의 내용을 자세히 입력해주세요"></textarea></div>
+      <div class="form-row-actions">
+        <button class="admin-btn" onclick="closeInquiry()">취소</button>
         <button class="admin-btn primary" onclick="submitInquiry()">문의 등록</button>
       </div>
     </div>
   </div>
 </div>
 
-<!-- 문의 상세 모달 -->
-<div class="modal-overlay" id="inquiryViewModal" onclick="if(event.target===this)closeInquiryView()">
-  <div class="notice-view-modal">
-    <div class="notice-view-header">
-      <div class="notice-view-title" id="inquiryViewTitle">—</div>
-      <div class="notice-view-meta" id="inquiryViewMeta">—</div>
-    </div>
-    <div class="notice-view-body" id="inquiryViewContent">—</div>
-    <div style="padding:0 28px;margin-bottom:16px">
-      <div style="font-family:'Space Mono',monospace;font-size:10px;color:var(--text3);letter-spacing:0.1em;margin-bottom:8px">답변</div>
-      <div id="inquiryViewAnswer" style="padding:14px;background:var(--bg2);border-radius:4px;font-size:13px;color:var(--text2);line-height:1.7"></div>
-    </div>
-    <div style="padding:0 28px 28px;display:flex;justify-content:flex-end">
-      <button class="btn-secondary" onclick="closeInquiryView()" style="padding:10px 24px">닫기</button>
-    </div>
-  </div>
-</div>
-
-<!-- ADMIN -->
+<!-- ADMIN PANEL -->
 <div class="admin-panel" id="adminPanel">
   <div class="admin-topbar">
     <span class="admin-topbar-title">GECKO LAB</span>
     <span class="admin-topbar-badge">ADMIN</span>
-    <button class="admin-close" onclick="closeAdmin()">✕ 관리자 패널 닫기</button>
+    <button class="admin-close-btn" onclick="closeAdmin()">✕ 닫기</button>
   </div>
   <div class="admin-layout">
     <div class="admin-sidebar">
       <div class="admin-nav-label">대시보드</div>
-      <div class="admin-nav-item active" onclick="switchAdminPage('dashboard')"><span class="admin-nav-icon">📊</span> 대시보드</div>
-      <div class="admin-nav-label">상품 관리</div>
-      <div class="admin-nav-item" onclick="switchAdminPage('products')"><span class="admin-nav-icon">📦</span> 상품 목록</div>
-      <div class="admin-nav-item" onclick="switchAdminPage('addProduct')"><span class="admin-nav-icon">➕</span> 상품 등록</div>
-      <div class="admin-nav-label">회원 관리</div>
-      <div class="admin-nav-item" onclick="switchAdminPage('users')"><span class="admin-nav-icon">👥</span> 회원 목록</div>
+      <div class="admin-nav-item active" onclick="switchAdmin('dashboard')"><span class="admin-nav-icon">📊</span> 대시보드</div>
+      <div class="admin-nav-label">상품</div>
+      <div class="admin-nav-item" onclick="switchAdmin('products')"><span class="admin-nav-icon">📦</span> 상품 목록</div>
+      <div class="admin-nav-item" onclick="switchAdmin('addProduct')"><span class="admin-nav-icon">➕</span> 상품 등록</div>
+      <div class="admin-nav-label">회원</div>
+      <div class="admin-nav-item" onclick="switchAdmin('users')"><span class="admin-nav-icon">👥</span> 회원 목록</div>
       <div class="admin-nav-label">게시판</div>
-      <div class="admin-nav-item" onclick="switchAdminPage('notices')"><span class="admin-nav-icon">📢</span> 공지사항</div>
-      <div class="admin-nav-item" onclick="switchAdminPage('reviews')"><span class="admin-nav-icon">⭐</span> 리뷰 관리</div>
+      <div class="admin-nav-item" onclick="switchAdmin('notices')"><span class="admin-nav-icon">📢</span> 공지사항</div>
+      <div class="admin-nav-item" onclick="switchAdmin('reviews')"><span class="admin-nav-icon">⭐</span> 리뷰 관리</div>
       <div class="admin-nav-label">주문/문의</div>
-      <div class="admin-nav-item" onclick="switchAdminPage('orders')"><span class="admin-nav-icon">🛍</span> 주문 목록</div>
-      <div class="admin-nav-item" onclick="switchAdminPage('inquiries')"><span class="admin-nav-icon">💬</span> 1대1 문의</div>
-      <div class="admin-nav-label">주문/문의</div>
-      <div class="admin-nav-item" onclick="switchAdminPage('orders')"><span class="admin-nav-icon">🛍</span> 주문 목록</div>
-      <div class="admin-nav-item" onclick="switchAdminPage('inquiries')"><span class="admin-nav-icon">💬</span> 1대1 문의</div>
+      <div class="admin-nav-item" onclick="switchAdmin('orders')"><span class="admin-nav-icon">🛍</span> 주문 목록</div>
+      <div class="admin-nav-item" onclick="switchAdmin('inquiries')"><span class="admin-nav-icon">💬</span> 1대1 문의</div>
     </div>
     <div class="admin-main">
+
+      <!-- 대시보드 -->
       <div class="admin-page active" id="admin-dashboard">
         <div class="admin-page-title">대시보드</div>
         <div class="admin-page-sub">GECKO LAB 운영 현황</div>
@@ -1446,91 +753,99 @@ async function renderAdminInquiries() {
           <div class="stat-card"><div class="stat-label">총 회원수</div><div class="stat-value" id="statUsers">—</div><div class="stat-sub">등록된 회원</div></div>
           <div class="stat-card"><div class="stat-label">상품 수</div><div class="stat-value" id="statProducts">—</div><div class="stat-sub">등록된 상품</div></div>
           <div class="stat-card"><div class="stat-label">총 주문수</div><div class="stat-value" id="statOrders">—</div><div class="stat-sub">전체 주문</div></div>
-          <div class="stat-card"><div class="stat-label">미답변 문의</div><div class="stat-value" id="statInquiries">—</div><div class="stat-sub">답변 대기중</div></div>
+          <div class="stat-card"><div class="stat-label">입금 대기</div><div class="stat-value" id="statPending">—</div><div class="stat-sub">확인 필요</div></div>
         </div>
-        <div style="font-family:'Space Mono',monospace;font-size:11px;color:var(--text3);margin-bottom:12px;letter-spacing:0.1em">최근 가입 회원</div>
-        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>닉네임</th><th>이메일</th><th>가입일</th><th>상태</th></tr></thead><tbody id="recentUsersTbody"></tbody></table></div>
+        <div style="font-family:'Space Mono',monospace;font-size:10px;color:var(--text3);margin-bottom:10px;font-weight:700;letter-spacing:0.1em">최근 가입 회원</div>
+        <div class="admin-table-wrap">
+          <table class="admin-table"><thead><tr><th>닉네임</th><th>이메일</th><th>가입일</th><th>상태</th></tr></thead>
+          <tbody id="recentUsersTbody"></tbody></table>
+        </div>
       </div>
+
+      <!-- 상품 목록 -->
       <div class="admin-page" id="admin-products">
         <div class="admin-page-title">상품 목록</div>
         <div class="admin-page-sub">등록된 상품을 관리합니다</div>
-        <div class="admin-action-row"><button class="admin-btn primary" onclick="switchAdminPage('addProduct')">+ 상품 등록</button></div>
-        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>상품명</th><th>카테고리</th><th>가격</th><th>평점</th><th>상태</th><th>관리</th></tr></thead><tbody id="adminProductsTbody"></tbody></table></div>
+        <div class="admin-action-row">
+          <input class="admin-search" placeholder="상품명 검색..." oninput="filterAdminProducts(this.value)">
+          <button class="admin-btn primary" onclick="switchAdmin('addProduct')">+ 상품 등록</button>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table"><thead><tr><th>상품명</th><th>카테고리</th><th>가격</th><th>평점</th><th>상태</th><th>관리</th></tr></thead>
+          <tbody id="adminProductsTbody"></tbody></table>
+        </div>
       </div>
+
+      <!-- 상품 등록 -->
       <div class="admin-page" id="admin-addProduct">
         <div class="admin-page-title">상품 등록</div>
         <div class="admin-page-sub">새 상품을 등록합니다</div>
-        <div class="product-form">
+        <div style="background:var(--surface);border:2px solid var(--border);border-radius:14px;padding:24px">
           <div class="form-grid">
-            <div class="form-group"><label class="form-label">상품명 *</label><input class="form-input" id="newProductName" placeholder="상품명 입력"></div>
-            <div class="form-group"><label class="form-label">카테고리 *</label><select class="form-select" id="newProductCategory"><option value="habitat">사육환경</option><option value="feeding">먹이/영양제</option><option value="accessory">악세서리</option></select></div>
-            <div class="form-group"><label class="form-label">판매가 (원) *</label><input class="form-input" id="newProductPrice" type="number" placeholder="15000"></div>
-            <div class="form-group"><label class="form-label">정가 (할인 시)</label><input class="form-input" id="newProductOrigPrice" type="number" placeholder="20000"></div>
-            <div class="form-group"><label class="form-label">뱃지</label><select class="form-select" id="newProductBadge"><option value="">없음</option><option value="NEW">NEW</option><option value="BEST">BEST</option><option value="SALE">SALE</option></select></div>
-            <div class="form-group"><label class="form-label">이모지 (이미지 없을 때)</label><input class="form-input" id="newProductEmoji" placeholder="🦎" maxlength="4"></div>
+            <div class="form-group"><label class="form-label">상품명 *</label><input class="form-input" id="npName" placeholder="상품명"></div>
+            <div class="form-group"><label class="form-label">카테고리 *</label>
+              <select class="form-select" id="npCategory"><option value="habitat">사육환경</option><option value="feeding">먹이/영양제</option><option value="accessory">악세서리</option></select>
+            </div>
+            <div class="form-group"><label class="form-label">판매가 *</label><input class="form-input" id="npPrice" type="number" placeholder="15000"></div>
+            <div class="form-group"><label class="form-label">정가 (할인 시)</label><input class="form-input" id="npOrigPrice" type="number" placeholder="20000"></div>
+            <div class="form-group"><label class="form-label">뱃지</label>
+              <select class="form-select" id="npBadge"><option value="">없음</option><option value="NEW">NEW</option><option value="BEST">BEST</option><option value="SALE">SALE</option></select>
+            </div>
+            <div class="form-group"><label class="form-label">이모지</label><input class="form-input" id="npEmoji" placeholder="🦎" maxlength="4"></div>
             <div class="form-group full">
               <label class="form-label">상품 이미지</label>
-              <div class="image-upload-wrap" id="imageDropZone"
-                onclick="document.getElementById('newProductImage').click()"
-                ondragover="handleDragOver(event)"
-                ondragleave="handleDragLeave(event)"
-                ondrop="handleDrop(event)">
-                <div id="imagePreviewWrap" style="display:none">
-                  <img id="imagePreview" style="max-height:180px;max-width:100%;border-radius:4px;object-fit:contain;">
-                  <div style="font-size:11px;color:var(--text3);margin-top:8px">클릭하거나 새 이미지를 드래그해서 교체</div>
-                </div>
-                <div id="imageUploadPlaceholder">
-                  <div style="font-size:36px;margin-bottom:8px">📷</div>
-                  <div style="font-size:12px;color:var(--text2);margin-bottom:4px">클릭, 드래그 앤 드롭, 또는 Ctrl+V</div>
-                  <div style="font-size:11px;color:var(--text3)">JPG, PNG, WEBP 지원</div>
-                </div>
+              <div class="image-upload-wrap" id="imgDropZone" onclick="document.getElementById('npImage').click()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+                <div id="imgPreviewWrap" style="display:none"><img id="imgPreview" style="max-height:160px;max-width:100%;border-radius:8px;object-fit:contain"><div style="font-size:11px;color:var(--text3);margin-top:6px">클릭하거나 새 이미지를 드래그해서 교체</div></div>
+                <div id="imgPlaceholder"><div style="font-size:28px;margin-bottom:6px">📷</div><div style="font-size:12px;color:var(--text2);font-weight:600">클릭, 드래그 앤 드롭, 또는 Ctrl+V</div></div>
               </div>
-              <input type="file" id="newProductImage" accept="image/*" style="display:none" onchange="previewImage(this)">
+              <input type="file" id="npImage" accept="image/*" style="display:none" onchange="previewNewProductImage(this)">
             </div>
-            <div class="form-group full"><label class="form-label">상품 설명 *</label><textarea class="form-textarea" id="newProductDesc" placeholder="상품 설명을 자세히 입력하세요"></textarea></div>
+            <div class="form-group full"><label class="form-label">상품 설명 *</label><textarea class="form-textarea" id="npDesc" placeholder="상품 설명을 자세히 입력하세요"></textarea></div>
           </div>
-          <div class="form-row-actions"><button class="admin-btn" onclick="switchAdminPage('products')">취소</button><button class="admin-btn primary" id="productSubmitBtn" onclick="submitNewProduct()">상품 등록</button></div>
+          <div class="form-row-actions">
+            <button class="admin-btn" onclick="switchAdmin('products')">취소</button>
+            <button class="admin-btn primary" id="npSubmitBtn" onclick="submitNewProduct()">상품 등록</button>
+          </div>
         </div>
       </div>
+
+      <!-- 회원 목록 -->
       <div class="admin-page" id="admin-users">
         <div class="admin-page-title">회원 관리</div>
         <div class="admin-page-sub">가입된 회원을 관리합니다</div>
-        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>닉네임</th><th>이메일</th><th>가입일</th><th>권한</th><th>상태</th><th>관리</th></tr></thead><tbody id="adminUsersTbody"></tbody></table></div>
+        <div class="admin-table-wrap">
+          <table class="admin-table"><thead><tr><th>닉네임</th><th>이메일</th><th>가입일</th><th>권한</th><th>상태</th><th>관리</th></tr></thead>
+          <tbody id="adminUsersTbody"></tbody></table>
+        </div>
       </div>
+
+      <!-- 공지사항 -->
       <div class="admin-page" id="admin-notices">
         <div class="admin-page-title">공지사항 관리</div>
         <div class="admin-page-sub">공지사항을 작성하고 관리합니다</div>
-        <div class="admin-action-row"><button class="admin-btn primary" onclick="openNoticeWrite()">+ 공지 작성</button></div>
-        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>제목</th><th>작성일</th><th>관리</th></tr></thead><tbody id="adminNoticesTbody"></tbody></table></div>
+        <div class="admin-action-row">
+          <button class="admin-btn primary" onclick="openNoticeWrite()">+ 공지 작성</button>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table"><thead><tr><th>제목</th><th>작성일</th><th>관리</th></tr></thead>
+          <tbody id="adminNoticesTbody"></tbody></table>
+        </div>
       </div>
+
+      <!-- 리뷰 관리 -->
       <div class="admin-page" id="admin-reviews">
         <div class="admin-page-title">리뷰 관리</div>
         <div class="admin-page-sub">고객 리뷰를 관리합니다</div>
         <div id="adminReviewsList"></div>
       </div>
-      <div class="admin-page" id="admin-orders">
-        <div class="admin-page-title">주문 목록</div>
-        <div class="admin-page-sub">접수된 주문을 관리합니다</div>
-        <div class="admin-table-wrap" style="overflow-x:auto">
-          <table class="admin-table">
-            <thead><tr><th>주문일시</th><th>주문자</th><th>상품</th><th>금액</th><th>결제수단</th><th>상태</th><th>배송정보</th></tr></thead>
-            <tbody id="adminOrdersTbody"></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="admin-page" id="admin-inquiries">
-        <div class="admin-page-title">1대1 문의</div>
-        <div class="admin-page-sub">고객 문의에 답변합니다</div>
-        <div id="adminInquiriesList"></div>
-      </div>
 
       <!-- 주문 목록 -->
       <div class="admin-page" id="admin-orders">
         <div class="admin-page-title">주문 목록</div>
-        <div class="admin-page-sub">고객 주문을 관리합니다</div>
+        <div class="admin-page-sub">고객 주문을 확인하고 상태를 관리합니다</div>
         <div class="admin-table-wrap">
           <table class="admin-table">
-            <thead><tr><th>주문일시</th><th>주문자</th><th>상품</th><th>결제수단</th><th>금액</th><th>상태</th><th>관리</th></tr></thead>
+            <thead><tr><th>주문일시</th><th>주문자</th><th>연락처</th><th>상품</th><th>결제수단</th><th>금액</th><th>상태</th><th>관리</th><th>삭제</th></tr></thead>
             <tbody id="adminOrdersTbody"></tbody>
           </table>
         </div>
@@ -1539,179 +854,883 @@ async function renderAdminInquiries() {
       <!-- 1대1 문의 -->
       <div class="admin-page" id="admin-inquiries">
         <div class="admin-page-title">1대1 문의</div>
-        <div class="admin-page-sub">고객 문의를 관리합니다</div>
+        <div class="admin-page-sub">고객 문의에 답변합니다</div>
         <div id="adminInquiriesList"></div>
       </div>
+
     </div>
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<!-- FIREBASE -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, updateProfile } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
+import { getFirestore, collection, doc, setDoc, getDoc, getDocs, addDoc, deleteDoc, updateDoc, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 
-<script>
-  // ── UI 헬퍼 함수들 ─────────────────────────────────────
-  function handleUserBtn() {
-    const dd = document.getElementById('userDropdown');
-    const userLabel = document.getElementById('userBtnLabel').textContent;
-    if (userLabel === '로그인') openAuth();
-    else dd.classList.toggle('open');
-  }
-  document.addEventListener('click', e => {
-    const wrap = document.getElementById('userMenuWrap');
-    if (!wrap.contains(e.target)) document.getElementById('userDropdown').classList.remove('open');
-  });
+const firebaseConfig = {
+  apiKey: "AIzaSyDbqerIemczisX0bSG11OAQMiKEaUQmw4I",
+  authDomain: "geckolab-8961f.firebaseapp.com",
+  projectId: "geckolab-8961f",
+  storageBucket: "geckolab-8961f.firebasestorage.app",
+  messagingSenderId: "480270406749",
+  appId: "1:480270406749:web:87c33cf691608fb7f669b4"
+};
 
-  function openAuth() { document.getElementById('authModal').classList.add('open'); document.body.style.overflow='hidden'; }
-  function closeAuth() { document.getElementById('authModal').classList.remove('open'); document.body.style.overflow=''; }
-  function switchAuthTab(tab) {
-    document.getElementById('loginTab').classList.toggle('active', tab==='login');
-    document.getElementById('registerTab').classList.toggle('active', tab==='register');
-    document.getElementById('loginForm').style.display = tab==='login'?'block':'none';
-    document.getElementById('registerForm').style.display = tab==='register'?'block':'none';
-  }
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const storage = getStorage(app);
+const googleProvider = new GoogleAuthProvider();
+const ADMIN_EMAIL = "admin@geckolab.kr";
 
-  function closeProductModal() { document.getElementById('productModal').classList.remove('open'); document.body.style.overflow=''; }
-  function changeQty(d) {
-    let q = parseInt(document.getElementById('modalQty').value);
-    q = Math.max(1, q+d);
-    document.getElementById('modalQty').value = q;
-    // currentQty는 module 스코프라 직접 접근 불가 — input value로 처리
-  }
+// ── STATE ────────────────────────────────────────────────
+let currentUser = null;
+let isAdmin = false;
+let products = [];
+let cart = [];
+let currentProduct = null;
+let currentQty = 1;
+let activeFilter = 'all';
+let selectedStars = 5;
+let newProductImageFile = null;
+let reviewImageFile = null;
 
-  function openCart() { document.getElementById('cartPanel').classList.add('open'); document.getElementById('cartBackdrop').classList.add('open'); document.body.style.overflow='hidden'; }
-  function closeCart() { document.getElementById('cartPanel').classList.remove('open'); document.getElementById('cartBackdrop').classList.remove('open'); document.body.style.overflow=''; }
+// ── XSS 방어 ─────────────────────────────────────────────
+function esc(str) {
+  if (!str && str !== 0) return '';
+  const d = document.createElement('div');
+  d.appendChild(document.createTextNode(String(str)));
+  return d.innerHTML;
+}
 
-  function openCheckout() {
-    if (document.getElementById('cartCount').textContent === '0') { window.showToast?.('장바구니가 비어 있어요!'); return; }
-    closeCart(); document.getElementById('checkoutModal').classList.add('open');
-  }
-  function closeCheckout() { document.getElementById('checkoutModal').classList.remove('open'); }
-  function selectPay(el) { document.querySelectorAll('.pay-btn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); }
+// ── TOAST ─────────────────────────────────────────────────
+function toast(msg, type='') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (type ? ' '+type : '');
+  setTimeout(() => t.className='toast', 2400);
+}
+window._toast = toast;
 
-  function closeNoticeView() { document.getElementById('noticeViewModal').classList.remove('open'); }
-  function openNoticeWrite() { document.getElementById('noticeWriteTitle').value=''; document.getElementById('noticeWriteContent').value=''; document.getElementById('noticeWriteModal').classList.add('open'); }
-  function closeNoticeWrite() { document.getElementById('noticeWriteModal').classList.remove('open'); }
+// ── SEED PRODUCTS ─────────────────────────────────────────
+const defaultProducts = [
+  {name:'레오파드 게코 하이드 박스',category:'habitat',categoryLabel:'사육환경',badge:'BEST',badgeClass:'badge-best',price:15000,origPrice:null,emoji:'🦎',rating:4.8,reviewCount:0,desc:'레오파드 게코의 은신처로 최적화된 3D 프린팅 하이드 박스. 탈피를 돕습니다.'},
+  {name:'사막 배경 코르크 보드',category:'habitat',categoryLabel:'사육환경',badge:'NEW',badgeClass:'badge-new',price:28000,origPrice:null,emoji:'🌵',rating:4.7,reviewCount:0,desc:'천연 코르크 소재로 제작된 사막 배경 패널.'},
+  {name:'스타터 세트',category:'habitat',categoryLabel:'사육환경',badge:null,price:38000,origPrice:48000,emoji:'🎁',rating:4.9,reviewCount:0,desc:'게코 입문자를 위한 완벽한 스타터 세트.'},
+  {name:'레오파드 게코 습식 슬레이브',category:'habitat',categoryLabel:'사육환경',badge:'SALE',badgeClass:'badge-sale',price:19000,origPrice:24000,emoji:'💧',rating:4.6,reviewCount:0,desc:'탈피를 도와주는 습식 슬레이브.'},
+  {name:'파충류 비타민 스프레이',category:'feeding',categoryLabel:'먹이/영양제',badge:'NEW',badgeClass:'badge-new',price:12000,origPrice:null,emoji:'🌟',rating:4.5,reviewCount:0,desc:'게코에게 필수 비타민과 미네랄을 간편하게 공급.'},
+  {name:'사육장 배경 데코 패널',category:'accessory',categoryLabel:'악세서리',badge:null,price:35000,origPrice:null,emoji:'🎨',rating:4.9,reviewCount:0,desc:'3D 프린팅으로 제작한 입체감 있는 사육장 배경 패널.'}
+];
 
-  function closeAdmin() { document.getElementById('adminPanel').classList.remove('open'); }
-
-  function openInquiry() {
-    if (!currentUser) { openAuth(); showToast('로그인 후 문의 가능해요.'); return; }
-    document.getElementById('inquiryTitle').value = '';
-    document.getElementById('inquiryContent').value = '';
-    document.getElementById('inquiryModal').classList.add('open');
-    document.body.style.overflow = 'hidden';
-  }
-  function closeInquiry() {
-    document.getElementById('inquiryModal').classList.remove('open');
-    document.body.style.overflow = '';
-  }
-
-  function openInquiryWrite() {
-    if (!currentUser) { openAuth(); return; }
-    document.getElementById('inquiryTitle').value = '';
-    document.getElementById('inquiryContent').value = '';
-    document.getElementById('inquiryWriteModal').classList.add('open');
-  }
-  function closeInquiryWrite() { document.getElementById('inquiryWriteModal').classList.remove('open'); }
-  function closeInquiryView() { document.getElementById('inquiryViewModal').classList.remove('open'); }
-
-  // XSS 방어 함수
-  function escapeHtml(str) {
-    if (!str) return '';
-    const div = document.createElement('div');
-    div.appendChild(document.createTextNode(String(str)));
-    return div.innerHTML;
-  }
-
-  window.toggleReviewLike = async function(productId, reviewId) {
-    if (!currentUser) { openAuth(); showToast('로그인 후 이용해주세요.'); return; }
-    if (!productId || !reviewId) return;
-    const reviewRef = doc(db, 'products', productId, 'reviews', reviewId);
-    const snap = await getDoc(reviewRef);
-    if (!snap.exists()) return;
-    const likedBy = snap.data().likedBy || [];
-    const uid = currentUser.uid;
-    if (likedBy.includes(uid)) {
-      await updateDoc(reviewRef, { likedBy: likedBy.filter(id => id !== uid) });
-    } else {
-      await updateDoc(reviewRef, { likedBy: [...likedBy, uid] });
-    }
-    // 리뷰 새로고침
-    await openProduct(productId);
-  };
-
-  window.previewReviewImage = function(input) {
-    if (input.files && input.files[0]) {
-      const file = input.files[0];
-      if (!file.type.startsWith('image/')) { showToast('이미지 파일만 가능해요.', 'error'); return; }
-      const reader = new FileReader();
-      reader.onload = e => {
-        const preview = document.getElementById('reviewImgPreview');
-        const label = document.getElementById('reviewImgLabel');
-        preview.src = e.target.result;
-        preview.style.display = 'block';
-        label.textContent = '📷 사진 변경';
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  function previewImage(input) {
-    if (input.files && input.files[0]) {
-      setImageFile(input.files[0]);
+async function seedProducts() {
+  const snap = await getDocs(collection(db, 'products'));
+  if (snap.empty) {
+    for (const p of defaultProducts) {
+      await addDoc(collection(db, 'products'), {...p, imageUrl:null, createdAt:serverTimestamp()});
     }
   }
+}
 
-  function setImageFile(file) {
-    if (!file.type.startsWith('image/')) { showToast('이미지 파일만 업로드 가능해요.', 'error'); return; }
-    // 파일 input에 세팅
-    const dt = new DataTransfer();
-    dt.items.add(file);
-    document.getElementById('newProductImage').files = dt.files;
-    // 미리보기
+// ── AUTH ──────────────────────────────────────────────────
+onAuthStateChanged(auth, async user => {
+  currentUser = user;
+  isAdmin = user ? user.email === ADMIN_EMAIL : false;
+  updateHeaderUI();
+});
+
+window.doLogin = async function() {
+  const email = document.getElementById('loginEmail').value.trim();
+  const pw = document.getElementById('loginPassword').value;
+  const errEl = document.getElementById('loginError');
+  errEl.classList.remove('show');
+  try {
+    await signInWithEmailAndPassword(auth, email, pw);
+    closeAuth();
+    toast('로그인했어요! 👋', 'success');
+  } catch(e) {
+    errEl.classList.add('show');
+  }
+};
+
+window.doGoogleLogin = async function() {
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+    await setDoc(doc(db,'users',result.user.uid), {
+      nickname: result.user.displayName||'게코유저',
+      email: result.user.email,
+      role: result.user.email===ADMIN_EMAIL?'admin':'user',
+      status:'active',
+      joinDate: new Date().toLocaleDateString('ko-KR')
+    }, {merge:true});
+    closeAuth();
+    toast(`환영합니다, ${result.user.displayName}님! 🦎`, 'success');
+  } catch(e) {
+    toast('구글 로그인 실패: '+e.message, 'error');
+  }
+};
+
+window.doRegister = async function() {
+  const nickname = document.getElementById('regNickname').value.trim();
+  const email = document.getElementById('regEmail').value.trim();
+  const pw = document.getElementById('regPassword').value;
+  const pwc = document.getElementById('regPasswordConfirm').value;
+  const agree = document.getElementById('agreeTerms').checked;
+  const errEl = document.getElementById('registerError');
+  errEl.classList.remove('show');
+  if (!nickname||!email||!pw) {errEl.textContent='모든 항목을 입력해주세요.';errEl.classList.add('show');return;}
+  if (pw.length<8) {errEl.textContent='비밀번호는 8자 이상이어야 해요.';errEl.classList.add('show');return;}
+  if (pw!==pwc) {errEl.textContent='비밀번호가 일치하지 않아요.';errEl.classList.add('show');return;}
+  if (!agree) {errEl.textContent='이용약관에 동의해주세요.';errEl.classList.add('show');return;}
+  try {
+    const cred = await createUserWithEmailAndPassword(auth, email, pw);
+    await updateProfile(cred.user, {displayName:nickname});
+    await setDoc(doc(db,'users',cred.user.uid), {
+      nickname, email,
+      role: email===ADMIN_EMAIL?'admin':'user',
+      status:'active',
+      joinDate: new Date().toLocaleDateString('ko-KR'),
+      createdAt: serverTimestamp()
+    });
+    closeAuth();
+    toast(`환영합니다, ${nickname}님! 🦎`, 'success');
+  } catch(e) {
+    if (e.code==='auth/email-already-in-use') errEl.textContent='이미 가입된 이메일이에요.';
+    else errEl.textContent=e.message;
+    errEl.classList.add('show');
+  }
+};
+
+window.doLogout = async function() {
+  await signOut(auth);
+  document.getElementById('userDropdown').classList.remove('open');
+  closeAdmin();
+  toast('로그아웃 됐어요.');
+};
+
+function updateHeaderUI() {
+  const btn = document.getElementById('userBtn');
+  const label = document.getElementById('userBtnLabel');
+  const icon = document.getElementById('userBtnIcon');
+  const adminLink = document.getElementById('adminMenuLink');
+  if (currentUser) {
+    btn.classList.add('logged');
+    icon.textContent = '✅';
+    label.textContent = currentUser.displayName || currentUser.email.split('@')[0];
+    document.getElementById('dropdownName').textContent = currentUser.displayName||'사용자';
+    document.getElementById('dropdownEmail').textContent = currentUser.email;
+    adminLink.style.display = isAdmin ? 'block' : 'none';
+  } else {
+    btn.classList.remove('logged');
+    icon.textContent = '👤';
+    label.textContent = '로그인';
+    adminLink.style.display = 'none';
+  }
+}
+
+// ── PRODUCTS ──────────────────────────────────────────────
+async function loadProducts() {
+  const snap = await getDocs(query(collection(db,'products'), orderBy('createdAt','asc')));
+  products = snap.docs.map(d => ({id:d.id,...d.data()}));
+  applyFilter();
+}
+
+function renderProducts(list) {
+  const grid = document.getElementById('productGrid');
+  document.getElementById('productCount').textContent = list.length+'개 상품';
+  grid.innerHTML = list.map(p => `
+    <div class="product-card" onclick="openProduct('${esc(p.id)}')">
+      <div class="product-img-wrap">
+        ${p.imageUrl ? `<img src="${esc(p.imageUrl)}" alt="${esc(p.name)}">` : `<div class="product-emoji">${p.emoji||'🦎'}</div>`}
+        ${p.badge ? `<span class="product-badge ${esc(p.badgeClass||'badge-new')}">${esc(p.badge)}</span>` : ''}
+        <button class="quick-add" onclick="event.stopPropagation();quickAdd('${esc(p.id)}')">+ 빠른 추가</button>
+      </div>
+      <div class="product-info">
+        <div class="product-category">${esc(p.categoryLabel)}</div>
+        <div class="product-name">${esc(p.name)}</div>
+        <div class="product-footer">
+          <div>
+            <span class="product-price">₩${(p.price||0).toLocaleString()}</span>
+            ${p.origPrice ? `<span class="product-price-orig">₩${p.origPrice.toLocaleString()}</span>` : ''}
+          </div>
+          <div class="product-stars">${'★'.repeat(Math.floor(p.rating||0))}<span>(${p.reviewCount||0})</span></div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+window.filterProducts = function(cat, btn) {
+  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  activeFilter = cat;
+  applyFilter();
+};
+window.sortProducts = function(val) { applyFilter(val); };
+
+function applyFilter(sortVal) {
+  let list = activeFilter==='all' ? [...products] : products.filter(p=>p.category===activeFilter);
+  const s = sortVal || document.querySelector('.sort-select')?.value || 'default';
+  if (s==='price-asc') list.sort((a,b)=>a.price-b.price);
+  else if (s==='price-desc') list.sort((a,b)=>b.price-a.price);
+  else if (s==='rating') list.sort((a,b)=>(b.rating||0)-(a.rating||0));
+  renderProducts(list);
+}
+
+// ── PRODUCT MODAL ─────────────────────────────────────────
+window.openProduct = async function(id) {
+  const p = products.find(x=>x.id===id);
+  if (!p) return;
+  currentProduct = p; currentQty = 1;
+  document.getElementById('modalQty').value = 1;
+  document.getElementById('modalCat').textContent = p.categoryLabel;
+  document.getElementById('modalName').textContent = p.name;
+  document.getElementById('modalStars').innerHTML = `${'★'.repeat(Math.floor(p.rating||0))} <span>${p.rating||0} (${p.reviewCount||0}개 리뷰)</span>`;
+  document.getElementById('modalDesc').textContent = p.desc;
+  document.getElementById('modalPrice').textContent = `₩${(p.price||0).toLocaleString()}`;
+  document.getElementById('modalOrig').textContent = p.origPrice ? `₩${p.origPrice.toLocaleString()}` : '';
+  document.getElementById('modalImg').innerHTML = p.imageUrl
+    ? `<img src="${esc(p.imageUrl)}" alt="${esc(p.name)}">`
+    : `<span style="font-size:100px">${p.emoji||'🦎'}</span>`;
+
+  // reviews
+  const revSnap = await getDocs(query(collection(db,'products',id,'reviews'), orderBy('createdAt','desc')));
+  const revs = revSnap.docs.map(d=>({id:d.id,...d.data()}));
+  document.getElementById('modalReviews').innerHTML = `
+    <div class="reviews-title">리뷰 (${revs.length})</div>
+    ${revs.length===0 ? '<p style="color:var(--text3);font-size:13px">아직 리뷰가 없어요!</p>' :
+      revs.map(r => {
+        const liked = currentUser && (r.likedBy||[]).includes(currentUser.uid);
+        const likeCount = (r.likedBy||[]).length;
+        return `
+        <div class="review-item">
+          <div class="review-header">
+            <div class="review-avatar">${esc((r.nickname||'?')[0])}</div>
+            <div>
+              <div class="review-name">${esc(r.nickname||'익명')}</div>
+              <div class="review-date">${esc(r.date||'')}</div>
+            </div>
+            <div class="review-stars">${'★'.repeat(Math.min(5,r.stars||0))}</div>
+          </div>
+          <div class="review-body">${esc(r.text)}</div>
+          ${r.reviewImageUrl && r.reviewImageUrl.startsWith('https://') ? `<img src="${esc(r.reviewImageUrl)}" style="max-width:100%;max-height:180px;object-fit:contain;border-radius:10px;margin-top:8px;cursor:pointer" onclick="window.open(this.src,'_blank')">` : ''}
+          <div class="review-footer">
+            <button class="like-btn ${liked?'liked':''}" onclick="toggleLike('${esc(id)}','${esc(r.id)}')">
+              👍 도움이 돼요 ${likeCount>0?`<span class="like-count">${likeCount}</span>`:''}
+            </button>
+          </div>
+        </div>`;
+      }).join('')}
+  `;
+
+  // review form
+  const rfEl = document.getElementById('reviewFormSection');
+  if (currentUser) {
+    selectedStars = 5; reviewImageFile = null;
+    rfEl.innerHTML = `
+      <div class="review-form-wrap">
+        <div class="review-form-title">리뷰 작성</div>
+        <div class="star-select" id="starSel">
+          ${[1,2,3,4,5].map(n=>`<span onclick="setStar(${n})" class="active">★</span>`).join('')}
+        </div>
+        <textarea class="review-textarea" id="reviewText" placeholder="솔직한 리뷰를 남겨주세요."></textarea>
+        <div class="review-img-upload" onclick="document.getElementById('reviewImgInput').click()">
+          <span id="reviewImgLabel">📷 사진 첨부 (선택)</span>
+          <img id="reviewImgPreview" style="display:none;max-height:100px;max-width:100%;border-radius:8px;margin-top:6px;object-fit:contain">
+        </div>
+        <input type="file" id="reviewImgInput" accept="image/*" style="display:none" onchange="previewReviewImg(this)">
+        <button class="review-submit" onclick="submitReview('${esc(id)}')">리뷰 등록</button>
+      </div>`;
+  } else {
+    rfEl.innerHTML = `<div style="font-size:12px;color:var(--text3);padding:0 0 14px;font-weight:600">리뷰 작성은 <span style="color:var(--accent);cursor:pointer" onclick="closeProductModal();openAuth()">로그인</span>이 필요해요.</div>`;
+  }
+
+  document.getElementById('productModal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+};
+
+window.setStar = function(n) {
+  selectedStars = n;
+  document.querySelectorAll('#starSel span').forEach((el,i)=>el.classList.toggle('active',i<n));
+};
+
+window.previewReviewImg = function(input) {
+  if (input.files[0]) {
+    reviewImageFile = input.files[0];
     const reader = new FileReader();
     reader.onload = e => {
-      document.getElementById('imagePreview').src = e.target.result;
-      document.getElementById('imagePreviewWrap').style.display = 'block';
-      document.getElementById('imageUploadPlaceholder').style.display = 'none';
+      document.getElementById('reviewImgPreview').src = e.target.result;
+      document.getElementById('reviewImgPreview').style.display = 'block';
+      document.getElementById('reviewImgLabel').textContent = '📷 사진 변경';
     };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(input.files[0]);
+  }
+};
+
+window.submitReview = async function(productId) {
+  const text = document.getElementById('reviewText').value.trim();
+  if (!text) { toast('리뷰 내용을 입력해주세요.'); return; }
+
+  // 1인 1리뷰 체크
+  const existing = await getDocs(collection(db,'products',productId,'reviews'));
+  if (existing.docs.some(d=>d.data().uid===currentUser.uid)) {
+    toast('이미 이 상품에 리뷰를 작성했어요!', 'error'); return;
   }
 
-  // 드래그 앤 드롭
-  function handleDragOver(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    document.getElementById('imageDropZone').classList.add('drag-over');
-  }
-  function handleDragLeave(e) {
-    e.preventDefault();
-    document.getElementById('imageDropZone').classList.remove('drag-over');
-  }
-  function handleDrop(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    document.getElementById('imageDropZone').classList.remove('drag-over');
-    const file = e.dataTransfer.files[0];
-    if (file) setImageFile(file);
+  const btn = document.querySelector('.review-submit');
+  if (btn) { btn.disabled=true; btn.textContent='등록 중...'; }
+
+  let reviewImageUrl = null;
+  if (reviewImageFile) {
+    try {
+      const sRef = ref(storage, `reviews/${Date.now()}_${reviewImageFile.name}`);
+      const snap = await uploadBytesResumable(sRef, reviewImageFile);
+      reviewImageUrl = await getDownloadURL(snap.ref);
+    } catch(e) {}
   }
 
-  // 클립보드 붙여넣기 (Ctrl+V)
-  document.addEventListener('paste', e => {
-    const adminPanel = document.getElementById('adminPanel');
-    if (!adminPanel.classList.contains('open')) return;
-    const items = e.clipboardData.items;
-    for (const item of items) {
-      if (item.type.startsWith('image/')) {
-        const file = item.getAsFile();
-        if (file) { setImageFile(file); showToast('클립보드 이미지가 붙여넣어졌어요! 📋', 'success'); }
-        break;
-      }
-    }
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`;
+  await addDoc(collection(db,'products',productId,'reviews'), {
+    nickname: currentUser.displayName||'익명',
+    uid: currentUser.uid,
+    stars: selectedStars, text, date: dateStr, reviewImageUrl, likedBy:[],
+    createdAt: serverTimestamp()
   });
 
-  function openMobileNav() { document.getElementById('mobileNav').classList.add('open'); document.body.style.overflow='hidden'; }
-  function closeMobileNav() { document.getElementById('mobileNav').classList.remove('open'); document.body.style.overflow=''; }
+  const revSnap = await getDocs(collection(db,'products',productId,'reviews'));
+  const revs = revSnap.docs.map(d=>d.data());
+  const avg = parseFloat((revs.reduce((s,r)=>s+r.stars,0)/revs.length).toFixed(1));
+  await updateDoc(doc(db,'products',productId), {reviewCount:revs.length, rating:avg});
+
+  await loadProducts();
+  closeProductModal();
+  toast('리뷰가 등록됐어요! 감사합니다 🦎', 'success');
+};
+
+window.toggleLike = async function(productId, reviewId) {
+  if (!currentUser) { openAuth(); return; }
+  const rRef = doc(db,'products',productId,'reviews',reviewId);
+  const snap = await getDoc(rRef);
+  if (!snap.exists()) return;
+  const likedBy = snap.data().likedBy || [];
+  const uid = currentUser.uid;
+  await updateDoc(rRef, {likedBy: likedBy.includes(uid) ? likedBy.filter(i=>i!==uid) : [...likedBy,uid]});
+  await openProduct(productId);
+};
+
+// ── CART ──────────────────────────────────────────────────
+window.addCurrentToCart = function() {
+  if (!currentProduct) return;
+  if (!currentUser) { closeProductModal(); openAuth(); return; }
+  currentQty = parseInt(document.getElementById('modalQty').value) || 1;
+  addToCart(currentProduct, currentQty);
+  closeProductModal();
+};
+
+window.quickAdd = function(id) {
+  if (!currentUser) { openAuth(); return; }
+  const p = products.find(x=>x.id===id);
+  if (p) addToCart(p, 1);
+};
+
+function addToCart(product, qty=1) {
+  const ex = cart.find(i=>i.id===product.id);
+  if (ex) ex.qty += qty;
+  else cart.push({...product, qty});
+  updateCartUI();
+  toast(`'${product.name}' 담았어요!`);
+}
+
+window.removeFromCart = function(id) { cart=cart.filter(i=>i.id!==id); updateCartUI(); };
+
+function updateCartUI() {
+  const total = cart.reduce((s,i)=>s+i.price*i.qty, 0);
+  document.getElementById('cartCount').textContent = cart.reduce((s,i)=>s+i.qty, 0);
+  document.getElementById('cartTotal').textContent = `₩${total.toLocaleString()}`;
+  document.getElementById('checkoutTotal').textContent = `₩${total.toLocaleString()}`;
+  const itemsEl = document.getElementById('cartItems');
+  const emptyEl = document.getElementById('cartEmpty');
+  if (cart.length===0) {
+    itemsEl.innerHTML=''; itemsEl.appendChild(emptyEl); emptyEl.style.display='flex';
+  } else {
+    emptyEl.style.display='none'; itemsEl.innerHTML=''; itemsEl.appendChild(emptyEl);
+    cart.forEach(item => {
+      const el = document.createElement('div');
+      el.className='cart-item';
+      el.innerHTML=`
+        <div class="cart-item-img">${item.imageUrl?`<img src="${esc(item.imageUrl)}" alt="${esc(item.name)}">`:(item.emoji||'🦎')}</div>
+        <div class="cart-item-info">
+          <div class="cart-item-name">${esc(item.name)}</div>
+          <div class="cart-item-price">₩${item.price.toLocaleString()}</div>
+          <div class="cart-item-qty">수량: ${item.qty}개</div>
+        </div>
+        <button class="cart-item-remove" onclick="removeFromCart('${esc(item.id)}')">✕</button>`;
+      itemsEl.appendChild(el);
+    });
+  }
+}
+
+// ── CHECKOUT ──────────────────────────────────────────────
+window.completePurchase = async function() {
+  if (cart.length===0) return;
+  const name = document.getElementById('checkoutName').value.trim();
+  const phone = document.getElementById('checkoutPhone').value.trim();
+  const address = document.getElementById('checkoutAddress').value.trim();
+  if (!name||!phone||!address) { toast('이름, 연락처, 배송지를 입력해주세요.','error'); return; }
+
+  const payBtn = document.querySelector('.pay-btn.active');
+  const payMethod = payBtn ? payBtn.textContent.trim() : '🏦 무통장입금';
+  const total = cart.reduce((s,i)=>s+i.price*i.qty, 0);
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+
+  try {
+    await addDoc(collection(db,'orders'), {
+      uid: currentUser?.uid||'guest',
+      nickname: currentUser?.displayName||name,
+      email: currentUser?.email||'',
+      name, phone, address, payMethod, total,
+      items: cart.map(i=>({id:i.id,name:i.name,price:i.price,qty:i.qty,emoji:i.emoji||'🦎'})),
+      status:'입금대기',
+      date: dateStr,
+      createdAt: serverTimestamp()
+    });
+    cart=[]; updateCartUI(); closeCheckout();
+    toast('🎉 주문 완료! 입금 후 배송이 시작됩니다.','success');
+  } catch(e) {
+    toast('주문 처리 중 오류가 발생했어요.','error');
+  }
+};
+
+// ── NOTICES ───────────────────────────────────────────────
+let noticesCache = [];
+async function loadNotices() {
+  const snap = await getDocs(query(collection(db,'notices'), orderBy('createdAt','desc')));
+  noticesCache = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const el = document.getElementById('noticeList');
+  if (!noticesCache.length) { el.innerHTML='<div style="padding:20px;text-align:center;color:var(--text3);font-size:13px">공지사항이 없어요.</div>'; return; }
+  el.innerHTML = noticesCache.map((n,i)=>`
+    <div class="board-item" onclick="viewNotice('${esc(n.id)}')">
+      <span class="board-num">${noticesCache.length-i}</span>
+      <span class="board-title">${esc(n.title)}${i===0?'<span class="board-badge">NEW</span>':''}</span>
+      <span class="board-author">${esc(n.author||'관리자')}</span>
+      <span class="board-date">${esc(n.date||'')}</span>
+    </div>`).join('');
+}
+
+window.viewNotice = function(id) {
+  const n = noticesCache.find(x=>x.id===id);
+  if (!n) return;
+  document.getElementById('noticeViewTitle').textContent = n.title;
+  document.getElementById('noticeViewMeta').textContent = `${n.author||'관리자'} | ${n.date||''}`;
+  document.getElementById('noticeViewBody').innerHTML = esc(n.content||'').split('\n').join('<br>');
+  document.getElementById('noticeViewModal').classList.add('open');
+};
+
+window.submitNotice = async function() {
+  const title = document.getElementById('noticeWriteTitle').value.trim();
+  const content = document.getElementById('noticeWriteContent').value.trim();
+  if (!title||!content) { toast('제목과 내용을 입력해주세요.'); return; }
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`;
+  await addDoc(collection(db,'notices'), {title,content,author:'관리자',date:dateStr,createdAt:serverTimestamp()});
+  closeNoticeWrite();
+  await loadNotices();
+  if (document.getElementById('admin-notices').classList.contains('active')) await adminRenderNotices();
+  toast('공지사항이 등록됐어요! 📢','success');
+};
+
+// ── 1대1 문의 ─────────────────────────────────────────────
+window.submitInquiry = async function() {
+  if (!currentUser) { closeInquiry(); openAuth(); return; }
+  const title = document.getElementById('inquiryTitle').value.trim();
+  const content = document.getElementById('inquiryContent').value.trim();
+  if (!title||!content) { toast('제목과 내용을 입력해주세요.'); return; }
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`;
+  await addDoc(collection(db,'inquiries'), {
+    uid:currentUser.uid, nickname:currentUser.displayName||'익명',
+    email:currentUser.email||'', title, content,
+    answered:false, answer:'', date:dateStr, createdAt:serverTimestamp()
+  });
+  closeInquiry();
+  toast('문의가 등록됐어요! 빠르게 답변할게요 😊','success');
+};
+
+// ── ADMIN ─────────────────────────────────────────────────
+window.openAdmin = async function() {
+  if (!isAdmin) { toast('관리자 권한이 필요해요.'); return; }
+  document.getElementById('adminPanel').classList.add('open');
+  document.getElementById('userDropdown').classList.remove('open');
+  await adminRenderDashboard();
+};
+
+window.switchAdmin = async function(page) {
+  document.querySelectorAll('.admin-nav-item').forEach(el=>el.classList.remove('active'));
+  document.querySelectorAll('.admin-page').forEach(el=>el.classList.remove('active'));
+  const navEl = document.querySelector(`.admin-nav-item[onclick="switchAdmin('${page}')"]`);
+  if (navEl) navEl.classList.add('active');
+  const pageEl = document.getElementById(`admin-${page}`);
+  if (pageEl) pageEl.classList.add('active');
+
+  if (page==='dashboard') await adminRenderDashboard();
+  else if (page==='products') adminRenderProducts(products);
+  else if (page==='users') await adminRenderUsers();
+  else if (page==='notices') await adminRenderNotices();
+  else if (page==='reviews') await adminRenderReviews();
+  else if (page==='orders') await adminRenderOrders();
+  else if (page==='inquiries') await adminRenderInquiries();
+};
+
+// 대시보드
+async function adminRenderDashboard() {
+  try {
+    const [usersSnap, productsSnap, ordersSnap] = await Promise.all([
+      getDocs(collection(db,'users')),
+      getDocs(collection(db,'products')),
+      getDocs(collection(db,'orders'))
+    ]);
+    const pending = ordersSnap.docs.filter(d=>d.data().status==='입금대기').length;
+    document.getElementById('statUsers').textContent = usersSnap.size;
+    document.getElementById('statProducts').textContent = productsSnap.size;
+    document.getElementById('statOrders').textContent = ordersSnap.size;
+    document.getElementById('statPending').textContent = pending;
+
+    const users = usersSnap.docs.map(d=>({uid:d.id,...d.data()})).slice(-5).reverse();
+    document.getElementById('recentUsersTbody').innerHTML = users.map(u=>`
+      <tr>
+        <td class="td-name">${esc(u.nickname||'—')}</td>
+        <td class="td-mono">${esc(u.email||'—')}</td>
+        <td class="td-mono">${esc(u.joinDate||'—')}</td>
+        <td><span class="status ${u.status==='active'?'status-active':'status-blocked'}">${u.status==='active'?'활성':'차단'}</span></td>
+      </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:16px">가입한 회원이 없어요.</td></tr>';
+  } catch(e) { console.error(e); }
+}
+
+// 상품
+function adminRenderProducts(list) {
+  document.getElementById('adminProductsTbody').innerHTML = (list||products).map(p=>`
+    <tr>
+      <td class="td-name">${esc(p.name)}</td>
+      <td>${esc(p.categoryLabel)}</td>
+      <td class="td-mono">₩${(p.price||0).toLocaleString()}</td>
+      <td class="td-mono">⭐ ${p.rating||0}</td>
+      <td><span class="status status-active">판매중</span></td>
+      <td><button class="admin-btn danger" style="padding:4px 10px;font-size:10px" onclick="adminDeleteProduct('${esc(p.id)}')">삭제</button></td>
+    </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:16px">상품이 없어요.</td></tr>';
+}
+window.filterAdminProducts = function(q) {
+  adminRenderProducts(products.filter(p=>p.name.toLowerCase().includes(q.toLowerCase())));
+};
+window.adminDeleteProduct = async function(id) {
+  if (!confirm('이 상품을 삭제하시겠어요?')) return;
+  await deleteDoc(doc(db,'products',id));
+  await loadProducts();
+  adminRenderProducts(products);
+  toast('상품이 삭제됐어요.');
+};
+
+// 상품 등록
+window.previewNewProductImage = function(input) {
+  if (input.files[0]) setNewProductImage(input.files[0]);
+};
+window.handleDragOver = function(e) { e.preventDefault(); document.getElementById('imgDropZone').classList.add('drag-over'); };
+window.handleDragLeave = function(e) { e.preventDefault(); document.getElementById('imgDropZone').classList.remove('drag-over'); };
+window.handleDrop = function(e) {
+  e.preventDefault(); document.getElementById('imgDropZone').classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) setNewProductImage(e.dataTransfer.files[0]);
+};
+function setNewProductImage(file) {
+  newProductImageFile = file;
+  const reader = new FileReader();
+  reader.onload = e => {
+    document.getElementById('imgPreview').src = e.target.result;
+    document.getElementById('imgPreviewWrap').style.display='block';
+    document.getElementById('imgPlaceholder').style.display='none';
+  };
+  reader.readAsDataURL(file);
+}
+document.addEventListener('paste', e => {
+  if (!document.getElementById('adminPanel').classList.contains('open')) return;
+  const item = Array.from(e.clipboardData.items).find(i=>i.type.startsWith('image/'));
+  if (item) { setNewProductImage(item.getAsFile()); toast('이미지 붙여넣기 완료! 📋','success'); }
+});
+
+window.submitNewProduct = async function() {
+  const name = document.getElementById('npName').value.trim();
+  const category = document.getElementById('npCategory').value;
+  const price = parseInt(document.getElementById('npPrice').value);
+  const origPriceRaw = document.getElementById('npOrigPrice').value;
+  const origPrice = origPriceRaw ? parseInt(origPriceRaw) : null;
+  const badge = document.getElementById('npBadge').value || null;
+  const emoji = document.getElementById('npEmoji').value || '🦎';
+  const desc = document.getElementById('npDesc').value.trim();
+  if (!name||!price||!desc) { toast('필수 항목을 입력해주세요.'); return; }
+
+  const btn = document.getElementById('npSubmitBtn');
+  btn.disabled=true; btn.textContent='등록 중...';
+
+  const catLabels = {habitat:'사육환경',feeding:'먹이/영양제',accessory:'악세서리'};
+  const badgeClasses = {NEW:'badge-new',BEST:'badge-best',SALE:'badge-sale'};
+
+  let imageUrl = null;
+  if (newProductImageFile) {
+    try {
+      const sRef = ref(storage, `products/${Date.now()}_${newProductImageFile.name}`);
+      const snap = await uploadBytesResumable(sRef, newProductImageFile);
+      imageUrl = await getDownloadURL(snap.ref);
+    } catch(e) { toast('이미지 업로드 실패','error'); }
+  }
+
+  await addDoc(collection(db,'products'), {
+    name, category, categoryLabel:catLabels[category],
+    badge, badgeClass:badge?badgeClasses[badge]:null,
+    price, origPrice, emoji, imageUrl,
+    rating:5.0, reviewCount:0, desc,
+    createdAt:serverTimestamp()
+  });
+
+  ['npName','npPrice','npOrigPrice','npEmoji','npDesc'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('npBadge').value='';
+  document.getElementById('npImage').value='';
+  document.getElementById('imgPreviewWrap').style.display='none';
+  document.getElementById('imgPlaceholder').style.display='block';
+  newProductImageFile = null;
+  btn.disabled=false; btn.textContent='상품 등록';
+
+  await loadProducts();
+  switchAdmin('products');
+  toast(`'${name}' 상품이 등록됐어요! 📦`,'success');
+};
+
+// 회원
+async function adminRenderUsers() {
+  const snap = await getDocs(collection(db,'users'));
+  const users = snap.docs.map(d=>({uid:d.id,...d.data()}));
+  document.getElementById('adminUsersTbody').innerHTML = users.map(u=>`
+    <tr>
+      <td class="td-name">${esc(u.nickname||'—')}</td>
+      <td class="td-mono">${esc(u.email||'—')}</td>
+      <td class="td-mono">${esc(u.joinDate||'—')}</td>
+      <td><span class="status status-new">${u.role==='admin'?'관리자':'일반'}</span></td>
+      <td><span class="status ${u.status==='active'?'status-active':'status-blocked'}">${u.status==='active'?'활성':'차단'}</span></td>
+      <td><button class="admin-btn" style="padding:4px 10px;font-size:10px" onclick="adminToggleBlock('${esc(u.uid)}','${esc(u.status)}')">${u.status==='active'?'차단':'해제'}</button></td>
+    </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:16px">가입한 회원이 없어요.</td></tr>';
+}
+window.adminToggleBlock = async function(uid, status) {
+  const newStatus = status==='active' ? 'blocked' : 'active';
+  await updateDoc(doc(db,'users',uid), {status:newStatus});
+  await adminRenderUsers();
+  toast('회원 상태가 변경됐어요.');
+};
+
+// 공지
+async function adminRenderNotices() {
+  const snap = await getDocs(query(collection(db,'notices'), orderBy('createdAt','desc')));
+  const notices = snap.docs.map(d=>({id:d.id,...d.data()}));
+  document.getElementById('adminNoticesTbody').innerHTML = notices.map(n=>`
+    <tr>
+      <td class="td-name">${esc(n.title)}</td>
+      <td class="td-mono">${esc(n.date||'—')}</td>
+      <td><button class="admin-btn danger" style="padding:4px 10px;font-size:10px" onclick="adminDeleteNotice('${esc(n.id)}')">삭제</button></td>
+    </tr>`).join('') || '<tr><td colspan="3" style="text-align:center;color:var(--text3);padding:16px">공지가 없어요.</td></tr>';
+}
+window.adminDeleteNotice = async function(id) {
+  if (!confirm('이 공지를 삭제하시겠어요?')) return;
+  await deleteDoc(doc(db,'notices',id));
+  await loadNotices();
+  await adminRenderNotices();
+  toast('공지가 삭제됐어요.');
+};
+
+// 리뷰
+async function adminRenderReviews() {
+  const psSnap = await getDocs(collection(db,'products'));
+  let html = '';
+  for (const pd of psSnap.docs) {
+    const revSnap = await getDocs(query(collection(db,'products',pd.id,'reviews'), orderBy('createdAt','desc')));
+    revSnap.docs.forEach(rd => {
+      const r = rd.data();
+      html += `
+        <div class="review-admin-item">
+          <div class="review-admin-header">
+            <div class="review-avatar">${esc((r.nickname||'?')[0])}</div>
+            <div>
+              <div class="review-name">${esc(r.nickname||'익명')}</div>
+              <div class="review-admin-product">${esc(pd.data().name)}</div>
+            </div>
+            <div style="margin-left:10px;color:var(--warn)">${'★'.repeat(r.stars||0)}</div>
+            <div class="review-admin-actions">
+              <button class="admin-btn danger" style="padding:4px 10px;font-size:10px" onclick="adminDeleteReview('${esc(pd.id)}','${esc(rd.id)}')">삭제</button>
+            </div>
+          </div>
+          <div style="font-size:13px;color:var(--text2)">${esc(r.text)}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:4px">${esc(r.date||'')}</div>
+        </div>`;
+    });
+  }
+  document.getElementById('adminReviewsList').innerHTML = html || '<div style="color:var(--text3);font-size:13px;padding:16px">아직 리뷰가 없어요.</div>';
+}
+window.adminDeleteReview = async function(productId, reviewId) {
+  if (!confirm('이 리뷰를 삭제하시겠어요?')) return;
+  await deleteDoc(doc(db,'products',productId,'reviews',reviewId));
+  const revSnap = await getDocs(collection(db,'products',productId,'reviews'));
+  const revs = revSnap.docs.map(d=>d.data());
+  if (revs.length>0) {
+    const avg = parseFloat((revs.reduce((s,r)=>s+r.stars,0)/revs.length).toFixed(1));
+    await updateDoc(doc(db,'products',productId), {reviewCount:revs.length,rating:avg});
+  } else {
+    await updateDoc(doc(db,'products',productId), {reviewCount:0,rating:5.0});
+  }
+  await loadProducts();
+  await adminRenderReviews();
+  toast('리뷰가 삭제됐어요.');
+};
+
+// 주문
+async function adminRenderOrders() {
+  const snap = await getDocs(query(collection(db,'orders'), orderBy('createdAt','desc')));
+  const orders = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const tbody = document.getElementById('adminOrdersTbody');
+  tbody.innerHTML = orders.length===0
+    ? '<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:20px">주문이 없어요.</td></tr>'
+    : orders.map(o=>`
+      <tr>
+        <td class="td-mono" style="font-size:10px">${esc(o.date||'—')}</td>
+        <td class="td-name">${esc(o.nickname||o.name||'—')}</td>
+        <td class="td-mono" style="font-size:10px">${esc(o.phone||'—')}</td>
+        <td style="font-size:11px;line-height:1.6">${(o.items||[]).map(i=>`${i.emoji||'🦎'} ${esc(i.name)} x${i.qty}`).join('<br>')}</td>
+        <td style="font-size:11px">${esc(o.payMethod||'—')}</td>
+        <td class="td-mono">₩${(o.total||0).toLocaleString()}</td>
+        <td><span class="status ${o.status==='배송완료'?'status-active':o.status==='배송중'?'status-pending':o.status==='취소'?'status-blocked':'status-new'}">${esc(o.status||'—')}</span></td>
+        <td>
+          <select class="order-status-select" onchange="adminUpdateOrder('${esc(o.id)}',this.value)">
+            <option ${o.status==='입금대기'?'selected':''}>입금대기</option>
+            <option ${o.status==='입금확인'?'selected':''}>입금확인</option>
+            <option ${o.status==='배송준비'?'selected':''}>배송준비</option>
+            <option ${o.status==='배송중'?'selected':''}>배송중</option>
+            <option ${o.status==='배송완료'?'selected':''}>배송완료</option>
+            <option ${o.status==='취소'?'selected':''}>취소</option>
+          </select>
+        </td>
+        <td><button class="admin-btn danger" style="padding:4px 10px;font-size:10px" onclick="adminDeleteOrder('${esc(o.id)}')">삭제</button></td>
+      </tr>`).join('');
+}
+window.adminDeleteOrder = async function(id) {
+  if (!confirm('이 주문을 삭제하시겠어요?')) return;
+  await deleteDoc(doc(db,'orders',id));
+  await adminRenderOrders();
+  toast('주문이 삭제됐어요.', 'success');
+};
+
+window.adminUpdateOrder = async function(id, status) {
+  await updateDoc(doc(db,'orders',id), {status});
+  toast(`"${status}"로 변경됐어요.`,'success');
+  const rows = document.querySelectorAll('#adminOrdersTbody tr');
+  // 상태 뱃지만 업데이트
+  await adminRenderOrders();
+};
+
+// 1대1 문의
+async function adminRenderInquiries() {
+  const snap = await getDocs(query(collection(db,'inquiries'), orderBy('createdAt','desc')));
+  const list = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const el = document.getElementById('adminInquiriesList');
+  el.innerHTML = list.map(q=>`
+    <div class="inquiry-item">
+      <div class="inquiry-header">
+        <div class="review-avatar">${esc((q.nickname||'?')[0])}</div>
+        <div>
+          <div class="review-name">${esc(q.nickname||'익명')}</div>
+          <div style="font-size:11px;color:var(--text3)">${esc(q.date||'')} | ${esc(q.email||'')}</div>
+        </div>
+        <span class="status ${q.answered?'status-active':'status-pending'}" style="margin-left:12px">${q.answered?'답변완료':'미답변'}</span>
+        <button class="admin-btn danger" style="margin-left:auto;padding:4px 10px;font-size:10px" onclick="adminDeleteInquiry('${esc(q.id)}')">삭제</button>
+      </div>
+      <div class="inquiry-title-text">${esc(q.title||'')}</div>
+      <div style="font-size:13px;color:var(--text2);margin-top:4px">${esc(q.content||'')}</div>
+      ${q.answer ? `<div class="inquiry-answer-box"><div class="inquiry-answer-label">GECKO LAB 답변</div><div style="font-size:13px;color:var(--text2)">${esc(q.answer)}</div></div>` : ''}
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <input class="admin-search" id="ans_${esc(q.id)}" placeholder="답변 입력..." value="${esc(q.answer||'')}" style="flex:1;padding:8px 12px;font-size:12px">
+        <button class="admin-btn primary" style="padding:8px 14px;font-size:11px" onclick="adminAnswerInquiry('${esc(q.id)}')">답변 등록</button>
+      </div>
+    </div>`).join('') || '<div style="color:var(--text3);font-size:13px;padding:16px">문의가 없어요.</div>';
+}
+window.adminDeleteInquiry = async function(id) {
+  if (!confirm('이 문의를 삭제하시겠어요?')) return;
+  await deleteDoc(doc(db,'inquiries',id));
+  await adminRenderInquiries();
+  toast('문의가 삭제됐어요.');
+};
+window.adminAnswerInquiry = async function(id) {
+  const answer = document.getElementById(`ans_${id}`).value.trim();
+  if (!answer) { toast('답변을 입력해주세요.'); return; }
+  await updateDoc(doc(db,'inquiries',id), {answer, answered:true});
+  await adminRenderInquiries();
+  toast('답변이 등록됐어요! ✅','success');
+};
+
+// ── INIT ──────────────────────────────────────────────────
+async function init() {
+  await seedProducts();
+  await loadProducts();
+  await loadNotices();
+}
+init();
+</script>
+
+<!-- UI SCRIPT (non-module) -->
+<script>
+function scrollToEl(id) { document.getElementById(id)?.scrollIntoView({behavior:'smooth'}); }
+function handleUserBtn() {
+  const dd = document.getElementById('userDropdown');
+  if (document.getElementById('userBtnLabel').textContent==='로그인') openAuth();
+  else dd.classList.toggle('open');
+}
+document.addEventListener('click', e => {
+  if (!document.getElementById('userMenuWrap').contains(e.target))
+    document.getElementById('userDropdown').classList.remove('open');
+});
+function openAuth() { document.getElementById('authModal').classList.add('open'); document.body.style.overflow='hidden'; }
+function closeAuth() { document.getElementById('authModal').classList.remove('open'); document.body.style.overflow=''; }
+function switchAuthTab(tab) {
+  document.getElementById('loginTab').classList.toggle('active', tab==='login');
+  document.getElementById('registerTab').classList.toggle('active', tab==='register');
+  document.getElementById('loginForm').style.display = tab==='login'?'block':'none';
+  document.getElementById('registerForm').style.display = tab==='register'?'block':'none';
+}
+function closeProductModal() { document.getElementById('productModal').classList.remove('open'); document.body.style.overflow=''; }
+function changeQty(d) {
+  const input = document.getElementById('modalQty');
+  input.value = Math.max(1, parseInt(input.value)+d);
+  // currentQty는 module에서 관리
+}
+function openCart() { document.getElementById('cartPanel').classList.add('open'); document.getElementById('cartBackdrop').classList.add('open'); document.body.style.overflow='hidden'; }
+function closeCart() { document.getElementById('cartPanel').classList.remove('open'); document.getElementById('cartBackdrop').classList.remove('open'); document.body.style.overflow=''; }
+function openCheckout() {
+  if (parseInt(document.getElementById('cartCount').textContent)===0) { window._toast?.('장바구니가 비어있어요!'); return; }
+  closeCart(); document.getElementById('checkoutModal').classList.add('open');
+}
+function closeCheckout() { document.getElementById('checkoutModal').classList.remove('open'); }
+function selectPay(el) {
+  document.querySelectorAll('.pay-btn').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('bankInfoBox').style.display = el.textContent.includes('무통장') ? 'block' : 'none';
+}
+function closeNoticeView() { document.getElementById('noticeViewModal').classList.remove('open'); }
+function openNoticeWrite() { document.getElementById('noticeWriteTitle').value=''; document.getElementById('noticeWriteContent').value=''; document.getElementById('noticeWriteModal').classList.add('open'); }
+function closeNoticeWrite() { document.getElementById('noticeWriteModal').classList.remove('open'); }
+function openInquiry() {
+  if (document.getElementById('userBtnLabel').textContent==='로그인') { openAuth(); return; }
+  document.getElementById('inquiryTitle').value=''; document.getElementById('inquiryContent').value='';
+  document.getElementById('inquiryModal').classList.add('open'); document.body.style.overflow='hidden';
+}
+function closeInquiry() { document.getElementById('inquiryModal').classList.remove('open'); document.body.style.overflow=''; }
+function closeAdmin() { document.getElementById('adminPanel').classList.remove('open'); }
+function openMobileNav() { document.getElementById('mobileNav').classList.add('open'); document.body.style.overflow='hidden'; }
+function closeMobileNav() { document.getElementById('mobileNav').classList.remove('open'); document.body.style.overflow=''; }
 </script>
 </body>
 </html>
