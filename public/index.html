@@ -69,13 +69,13 @@ nav a:hover{color:var(--accent)}
 .hero{height:480px;position:relative;overflow:hidden;display:flex;align-items:center;border-bottom:1px solid var(--border)}
 .hero-bg{position:absolute;inset:0;background:radial-gradient(ellipse 60% 80% at 70% 50%,rgba(45,106,79,0.15) 0%,transparent 60%),linear-gradient(135deg,#e8f5e9 0%,#f1f8f1 100%)}
 .hero-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(45,106,79,0.08) 1px,transparent 1px),linear-gradient(90deg,rgba(45,106,79,0.08) 1px,transparent 1px);background-size:48px 48px;opacity:0.4}
-.hero-content{position:relative;z-index:2;padding:0 64px;max-width:640px}
-.hero-eyebrow{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:0.2em;color:var(--accent);text-transform:uppercase;margin-bottom:16px;display:flex;align-items:center;gap:12px}
+.hero-content{position:relative;z-index:2;padding:0 40px;max-width:680px;width:100%;box-sizing:border-box;overflow:visible}
+.hero-eyebrow{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:0.2em;color:var(--accent);text-transform:uppercase;margin-bottom:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .hero-eyebrow::before{content:'';display:block;width:32px;height:2px;background:var(--accent);border-radius:2px}
 .hero-title{font-family:'Nunito',sans-serif;font-size:clamp(48px,7vw,80px);line-height:1;font-weight:900;color:var(--text);margin-bottom:20px}
 .hero-title span{color:var(--accent)}
 .hero-desc{font-size:15px;line-height:1.7;color:var(--text2);margin-bottom:32px;max-width:440px}
-.hero-cta{display:flex;gap:14px;flex-wrap:wrap}
+.hero-cta{display:flex;gap:12px;flex-wrap:wrap;max-width:100%}
 .btn-primary{background:var(--accent);color:#fff;border:none;padding:13px 28px;font-family:'Nunito',sans-serif;font-size:13px;font-weight:800;cursor:pointer;border-radius:25px;transition:all 0.2s}
 .btn-primary:hover{background:var(--accent2);transform:translateY(-2px)}
 .btn-secondary{background:transparent;color:var(--accent);border:2px solid var(--accent);padding:11px 26px;font-family:'Nunito',sans-serif;font-size:13px;font-weight:800;cursor:pointer;border-radius:25px;transition:all 0.2s}
@@ -137,8 +137,18 @@ nav a:hover{color:var(--accent)}
 .qty-ctrl button{background:var(--bg2);border:none;color:var(--text);width:36px;height:36px;font-size:16px;cursor:pointer;font-weight:700}
 .qty-ctrl button:hover{background:var(--accent-dim);color:var(--accent)}
 .qty-ctrl input{width:44px;height:36px;text-align:center;background:#fff;border:none;border-left:2px solid var(--border);border-right:2px solid var(--border);color:var(--text);font-size:13px;font-weight:700}
-.modal-add-btn{width:100%;padding:14px;background:var(--accent);color:#fff;border:none;font-family:'Nunito',sans-serif;font-size:14px;font-weight:800;cursor:pointer;border-radius:25px;transition:all 0.2s}
-.modal-add-btn:hover{background:var(--accent2)}
+.modal-btn-group{display:flex;flex-direction:column;gap:8px;margin-top:4px}
+.modal-buy-btn{width:100%;padding:13px;background:var(--accent);color:#fff;border:none;font-family:'Nunito',sans-serif;font-size:14px;font-weight:800;cursor:pointer;border-radius:25px;transition:all 0.2s}
+.modal-buy-btn:hover{background:var(--accent2)}
+.modal-cart-btn{width:100%;padding:12px;background:#fff;color:var(--accent);border:2px solid var(--accent);font-family:'Nunito',sans-serif;font-size:14px;font-weight:800;cursor:pointer;border-radius:25px;transition:all 0.2s}
+.modal-cart-btn:hover{background:var(--accent-dim)}
+.modal-wish-btn{width:100%;padding:10px;background:var(--bg2);color:var(--text3);border:2px solid var(--border);font-family:'Nunito',sans-serif;font-size:13px;font-weight:700;cursor:pointer;border-radius:25px;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:6px}
+.modal-wish-btn:hover,.modal-wish-btn.wished{border-color:var(--danger);color:var(--danger);background:rgba(224,90,58,0.06)}
+.modal-wish-btn.wished .wish-icon{color:var(--danger)}
+.product-detail-imgs{padding:0 32px 28px}
+.product-detail-item{margin-bottom:28px}
+.product-detail-item img{width:100%;border-radius:12px;object-fit:cover}
+.product-detail-item p{font-size:13px;color:var(--text2);line-height:1.7;margin-top:10px;white-space:pre-line}
 
 /* REVIEWS */
 .reviews-section{padding:28px 32px;border-top:2px solid var(--border)}
@@ -275,6 +285,7 @@ nav a:hover{color:var(--accent)}
 
 /* ADMIN */
 .admin-panel{position:fixed;inset:0;background:var(--bg);z-index:500;display:none;flex-direction:column;overflow:hidden}
+  #orderDetailModal{z-index:600}
 .admin-panel.open{display:flex}
 .admin-topbar{height:54px;background:var(--accent);display:flex;align-items:center;padding:0 22px;gap:14px;flex-shrink:0}
 .admin-topbar-title{font-family:'Nunito',sans-serif;font-size:20px;font-weight:900;color:#fff}
@@ -369,7 +380,7 @@ footer{background:var(--accent);border-top:2px solid var(--border);padding:44px 
   .cart-btn{padding:6px 12px;font-size:11px}
   .cart-count{width:16px;height:16px;font-size:9px}
   .hero{height:auto;min-height:360px;padding:48px 0}
-  .hero-content{padding:0 20px;max-width:100%}
+  .hero-content{padding:0 16px;max-width:100%;width:100%;box-sizing:border-box}
   .hero-title{font-size:48px}
   .hero-desc{font-size:13px;margin-bottom:24px}
   .section{padding:32px 14px}
@@ -423,9 +434,9 @@ footer{background:var(--accent);border-top:2px solid var(--border);padding:44px 
     <span class="logo-sub">REPTILE GOODS</span>
   </div>
   <nav>
-    <a onclick="scrollTo('products')">상품</a>
-    <a onclick="scrollTo('noticeSection')">공지사항</a>
-    <a onclick="scrollTo('products')">리뷰</a>
+    <a onclick="scrollToSection('products')">상품</a>
+    <a onclick="scrollToSection('noticeSection')">공지사항</a>
+    <a onclick="scrollToSection('products')">리뷰</a>
     <a onclick="openInquiry()">1:1 문의</a>
   </nav>
   <button class="hamburger" onclick="openMobileNav()">
@@ -450,19 +461,7 @@ footer{background:var(--accent);border-top:2px solid var(--border);padding:44px 
   </div>
 </header>
 
-<!-- TICKER -->
-<div class="ticker-wrap"><div class="ticker">
-  <span class="ticker-item">🦎 파충류 전문 3D 프린팅 용품</span>
-  <span class="ticker-item">— <b>FREE SHIPPING</b> 50,000원 이상 무료배송 —</span>
-  <span class="ticker-item">🌿 자연 친화적 소재 사용</span>
-  <span class="ticker-item">— <b>GECKO LAB</b> 도마뱀의 최적 환경을 —</span>
-  <span class="ticker-item">✨ 레오파드 게코 전문 용품</span>
-  <span class="ticker-item">— <b>MADE IN KOREA</b> 국내 제작 —</span>
-  <span class="ticker-item">🦎 파충류 전문 3D 프린팅 용품</span>
-  <span class="ticker-item">— <b>FREE SHIPPING</b> 50,000원 이상 무료배송 —</span>
-  <span class="ticker-item">🌿 자연 친화적 소재 사용</span>
-  <span class="ticker-item">— <b>GECKO LAB</b> 도마뱀의 최적 환경을 —</span>
-</div></div>
+
 
 <!-- HERO -->
 <section class="hero">
@@ -473,8 +472,8 @@ footer{background:var(--accent);border-top:2px solid var(--border);padding:44px 
     <h1 class="hero-title">YOUR <span>GECKO</span><br>DESERVES<br>THE BEST.</h1>
     <p class="hero-desc">3D 프린팅 기술로 만든 파충류 전용 용품. 게코의 자연 서식환경을 사육장에서 완벽하게 재현합니다.</p>
     <div class="hero-cta">
-      <button class="btn-primary" onclick="scrollTo('products')">쇼핑하기</button>
-      <button class="btn-secondary" onclick="scrollTo('noticeSection')">공지사항</button>
+      <button class="btn-primary" onclick="scrollToSection('products')">쇼핑하기</button>
+      <button class="btn-secondary" onclick="scrollToSection('noticeSection')">공지사항</button>
     </div>
   </div>
 </section>
@@ -523,14 +522,14 @@ footer{background:var(--accent);border-top:2px solid var(--border);padding:44px 
     </div>
     <div>
       <div class="footer-col-title">쇼핑</div>
-      <a class="footer-link" onclick="scrollTo('products')">사육환경 용품</a>
-      <a class="footer-link" onclick="scrollTo('products')">먹이/영양제</a>
-      <a class="footer-link" onclick="scrollTo('products')">악세서리</a>
+      <a class="footer-link" onclick="scrollToSection('products')">사육환경 용품</a>
+      <a class="footer-link" onclick="scrollToSection('products')">먹이/영양제</a>
+      <a class="footer-link" onclick="scrollToSection('products')">악세서리</a>
     </div>
     <div>
       <div class="footer-col-title">고객센터</div>
-      <a class="footer-link" onclick="scrollTo('noticeSection')">공지사항</a>
-      <a class="footer-link" onclick="scrollTo('noticeSection')">주문/배송 안내</a>
+      <a class="footer-link" onclick="scrollToSection('noticeSection')">공지사항</a>
+      <a class="footer-link" onclick="scrollToSection('noticeSection')">주문/배송 안내</a>
       <a class="footer-link" onclick="openInquiry()">1:1 문의</a>
     </div>
   </div>
@@ -566,9 +565,16 @@ footer{background:var(--accent);border-top:2px solid var(--border);padding:44px 
             <button onclick="changeQty(1)">+</button>
           </div>
         </div>
-        <button class="modal-add-btn" onclick="addCurrentToCart()">장바구니 담기</button>
+        <div class="modal-btn-group">
+          <button class="modal-buy-btn" onclick="buyNow()">바로 구매</button>
+          <button class="modal-cart-btn" onclick="addCurrentToCart()">🛒 장바구니 담기</button>
+          <button class="modal-wish-btn" id="wishBtn" onclick="toggleWish()">
+            <span class="wish-icon">🤍</span> 위시리스트 담기
+          </button>
+        </div>
       </div>
     </div>
+    <div class="product-detail-imgs" id="productDetailImgs"></div>
     <div class="reviews-section" id="modalReviews"></div>
     <div class="reviews-section" id="reviewFormSection" style="border-top:none;padding-top:0"></div>
   </div>
@@ -607,6 +613,10 @@ footer{background:var(--accent);border-top:2px solid var(--border);padding:44px 
       <input class="checkout-input" id="checkoutPhone" placeholder="010-0000-0000" type="tel">
       <div class="checkout-label">배송지 *</div>
       <input class="checkout-input" id="checkoutAddress" placeholder="주소를 입력하세요" type="text">
+      <div class="checkout-label">상세 주소</div>
+      <input class="checkout-input" id="checkoutAddressDetail" placeholder="동/호수, 층수 등" type="text">
+      <div class="checkout-label">추가 요청 사항</div>
+      <textarea class="checkout-input" id="checkoutRequest" placeholder="배송 시 요청사항을 입력해주세요 (예: 문 앞에 놓아주세요)" rows="3" style="resize:none;height:auto"></textarea>
       <div class="checkout-label">결제 수단</div>
       <div class="pay-grid">
         <div class="pay-btn" onclick="selectPay(this)">💳 카드</div>
@@ -720,6 +730,20 @@ footer{background:var(--accent);border-top:2px solid var(--border);padding:44px 
   </div>
 </div>
 
+<!-- 주문 상세 모달 -->
+<div class="modal-overlay" id="orderDetailModal" id="orderDetailModal">
+  <div class="notice-view-modal" style="max-width:520px">
+    <div class="notice-view-header">
+      <div class="notice-view-title">주문 상세 정보</div>
+      <div class="notice-view-meta" id="orderDetailDate"></div>
+    </div>
+    <div style="padding:24px;display:flex;flex-direction:column;gap:10px" id="orderDetailBody"></div>
+    <div class="modal-action-footer">
+      <button class="btn-secondary" id="orderDetailCloseBtn">닫기</button>
+    </div>
+  </div>
+</div>
+
 <!-- ADMIN PANEL -->
 <div class="admin-panel" id="adminPanel">
   <div class="admin-topbar">
@@ -800,7 +824,12 @@ footer{background:var(--accent);border-top:2px solid var(--border);padding:44px 
               </div>
               <input type="file" id="npImage" accept="image/*" style="display:none" onchange="previewNewProductImage(this)">
             </div>
-            <div class="form-group full"><label class="form-label">상품 설명 *</label><textarea class="form-textarea" id="npDesc" placeholder="상품 설명을 자세히 입력하세요"></textarea></div>
+            <div class="form-group full"><label class="form-label">상품 간단 설명 *</label><textarea class="form-textarea" id="npDesc" placeholder="상품 카드에 표시될 짧은 설명 (1-2줄)"></textarea></div>
+            <div class="form-group full">
+              <label class="form-label">상세 설명 이미지 (최대 5장)</label>
+              <div id="detailImgList" style="display:flex;flex-direction:column;gap:12px;margin-bottom:8px"></div>
+              <button class="admin-btn" type="button" onclick="addDetailImgRow()" style="width:100%">+ 이미지 + 설명 추가</button>
+            </div>
           </div>
           <div class="form-row-actions">
             <button class="admin-btn" onclick="switchAdmin('products')">취소</button>
@@ -814,7 +843,7 @@ footer{background:var(--accent);border-top:2px solid var(--border);padding:44px 
         <div class="admin-page-title">회원 관리</div>
         <div class="admin-page-sub">가입된 회원을 관리합니다</div>
         <div class="admin-table-wrap">
-          <table class="admin-table"><thead><tr><th>닉네임</th><th>이메일</th><th>가입일</th><th>권한</th><th>상태</th><th>관리</th></tr></thead>
+          <table class="admin-table"><thead><tr><th>닉네임</th><th>이메일</th><th>가입일</th><th>권한</th><th>상태</th><th>차단</th><th>삭제</th></tr></thead>
           <tbody id="adminUsersTbody"></tbody></table>
         </div>
       </div>
@@ -845,7 +874,7 @@ footer{background:var(--accent);border-top:2px solid var(--border);padding:44px 
         <div class="admin-page-sub">고객 주문을 확인하고 상태를 관리합니다</div>
         <div class="admin-table-wrap">
           <table class="admin-table">
-            <thead><tr><th>주문일시</th><th>주문자</th><th>연락처</th><th>상품</th><th>결제수단</th><th>금액</th><th>상태</th><th>관리</th><th>삭제</th></tr></thead>
+            <thead><tr><th>주문일시</th><th>주문자</th><th>연락처</th><th>상품</th><th>결제수단</th><th>금액</th><th>상태</th><th>관리</th><th>상세</th><th>삭제</th></tr></thead>
             <tbody id="adminOrdersTbody"></tbody>
           </table>
         </div>
@@ -865,7 +894,7 @@ footer{background:var(--accent);border-top:2px solid var(--border);padding:44px 
 <!-- FIREBASE -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, updateProfile, sendEmailVerification } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, updateProfile, sendEmailVerification } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, addDoc, deleteDoc, updateDoc, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 
@@ -947,15 +976,14 @@ window.doLogin = async function() {
   errEl.classList.remove('show');
   try {
     const cred = await signInWithEmailAndPassword(auth, email, pw);
-    if (!cred.user.emailVerified) {
+    // 관리자는 이메일 인증 체크 건너뜀
+    if (!cred.user.emailVerified && cred.user.email !== ADMIN_EMAIL) {
       await signOut(auth);
-      errEl.textContent = '이메일 인증이 필요해요. 받은 편지함을 확인해주세요.';
-      errEl.classList.add('show');
-      // 재발송 버튼
       document.getElementById('loginError').innerHTML = `
         이메일 인증이 필요해요.
         <span style="color:var(--accent);cursor:pointer;font-weight:800;margin-left:6px"
           onclick="resendVerification('${email}','${pw}')">인증 메일 재발송</span>`;
+      errEl.classList.add('show');
       return;
     }
     closeAuth();
@@ -1023,6 +1051,117 @@ window.resendVerification = async function(email, pw) {
   } catch(e) {
     toast('재발송 실패: ' + e.message, 'error');
   }
+};
+
+// ── 위시리스트 ─────────────────────────────────────────
+function getWishlist() {
+  return JSON.parse(localStorage.getItem('gl_wishlist') || '[]');
+}
+function saveWishlist(arr) {
+  localStorage.setItem('gl_wishlist', JSON.stringify(arr));
+}
+
+window.toggleWish = function() {
+  if (!currentProduct) return;
+  const list = getWishlist();
+  const idx = list.findIndex(i => i.id === currentProduct.id);
+  const btn = document.getElementById('wishBtn');
+  if (idx >= 0) {
+    list.splice(idx, 1);
+    btn.innerHTML = '<span class="wish-icon">🤍</span> 위시리스트 담기';
+    btn.classList.remove('wished');
+    toast('위시리스트에서 제거됐어요.');
+  } else {
+    list.push({ id: currentProduct.id, name: currentProduct.name, price: currentProduct.price, emoji: currentProduct.emoji, imageUrl: currentProduct.imageUrl });
+    btn.innerHTML = '<span class="wish-icon">❤️</span> 위시리스트 담김';
+    btn.classList.add('wished');
+    toast('위시리스트에 추가됐어요! ❤️', 'success');
+  }
+  saveWishlist(list);
+};
+
+window.buyNow = function() {
+  if (!currentProduct) return;
+  if (!currentUser) { closeProductModal(); openAuth(); return; }
+  const qty = parseInt(document.getElementById('modalQty').value) || 1;
+  addToCart(currentProduct, qty);
+  closeProductModal();
+  openCheckout();
+};
+
+// ── 상세 이미지 렌더 ───────────────────────────────────
+function renderDetailImgs(detailImages) {
+  const el = document.getElementById('productDetailImgs');
+  if (!el) return;
+  if (!detailImages || detailImages.length === 0) { el.innerHTML = ''; return; }
+  el.innerHTML = detailImages.map(item => `
+    <div class="product-detail-item">
+      ${item.imageUrl ? `<img src="${esc(item.imageUrl)}" alt="상품 상세 이미지">` : ''}
+      ${item.desc ? `<p>${esc(item.desc)}</p>` : ''}
+    </div>
+  `).join('');
+}
+
+// ── 상세 이미지 행 추가 (관리자 상품 등록) ──────────────
+window.addDetailImgRow = function() {
+  const list = document.getElementById('detailImgList');
+  const idx = list.children.length;
+  if (idx >= 5) { toast('최대 5장까지 추가 가능해요.'); return; }
+  const row = document.createElement('div');
+  row.className = 'detail-img-row';
+  row.style.cssText = 'background:var(--bg2);border:2px solid var(--border);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:8px';
+  row.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:11px;color:var(--text3);font-weight:700;font-family:'Space Mono',monospace">이미지 ${idx+1}</span>
+      <button type="button" onclick="this.closest('.detail-img-row').remove()" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:13px">✕ 삭제</button>
+    </div>
+    <div class="image-upload-wrap detail-drop-zone" style="min-height:80px"
+      onclick="this.nextElementSibling.click()"
+      ondragover="event.preventDefault();this.classList.add('drag-over')"
+      ondragleave="this.classList.remove('drag-over')"
+      ondrop="handleDetailDrop(event,this)">
+      <div class="detail-img-placeholder" style="font-size:11px;color:var(--text2);font-weight:600;text-align:center">📷 클릭 또는 드래그 앤 드롭</div>
+    </div>
+    <input type="file" accept="image/*" style="display:none" onchange="previewDetailImgFromInput(this)">
+    <textarea class="form-textarea" placeholder="이미지 아래에 표시할 설명 (선택)" rows="2"></textarea>
+  `;
+  list.appendChild(row);
+};
+
+window.handleDetailDrop = function(e, zone) {
+  e.preventDefault();
+  zone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file && file.type.startsWith('image/')) setDetailZoneImage(zone, file);
+};
+
+function setDetailZoneImage(zone, file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    zone.innerHTML = `<img src="${e.target.result}" style="max-height:120px;border-radius:8px;object-fit:contain"><div style="font-size:11px;color:var(--text3);margin-top:4px">클릭하거나 드래그해서 교체</div>`;
+    zone._file = file;
+    zone.onclick = function() { this.nextElementSibling.click(); };
+  };
+  reader.readAsDataURL(file);
+}
+
+window.previewDetailImgFromInput = function(input) {
+  if (input.files[0]) {
+    const zone = input.previousElementSibling;
+    setDetailZoneImage(zone, input.files[0]);
+  }
+};
+
+window.previewDetailImg = function(input, idx) {
+  if (!input.files[0]) return;
+  const uploadWrap = input.previousElementSibling;
+  const reader = new FileReader();
+  reader.onload = e => {
+    uploadWrap.innerHTML = `<img src="${e.target.result}" style="max-height:120px;border-radius:8px;object-fit:contain">`;
+    uploadWrap.dataset.file = idx;
+  };
+  reader.readAsDataURL(input.files[0]);
+  input.dataset.ready = '1';
 };
 
 window.doLogout = async function() {
@@ -1113,9 +1252,20 @@ window.openProduct = async function(id) {
   document.getElementById('modalDesc').textContent = p.desc;
   document.getElementById('modalPrice').textContent = `₩${(p.price||0).toLocaleString()}`;
   document.getElementById('modalOrig').textContent = p.origPrice ? `₩${p.origPrice.toLocaleString()}` : '';
+  // 위시리스트 상태 반영
+  const wishBtn = document.getElementById('wishBtn');
+  if (wishBtn) {
+    const wished = getWishlist().some(i => i.id === id);
+    wishBtn.innerHTML = wished ? '<span class="wish-icon">❤️</span> 위시리스트 담김' : '<span class="wish-icon">🤍</span> 위시리스트 담기';
+    wishBtn.classList.toggle('wished', wished);
+  }
+
   document.getElementById('modalImg').innerHTML = p.imageUrl
     ? `<img src="${esc(p.imageUrl)}" alt="${esc(p.name)}">`
     : `<span style="font-size:100px">${p.emoji||'🦎'}</span>`;
+
+  // 상세 이미지 렌더
+  renderDetailImgs(p.detailImages || []);
 
   // reviews
   const revSnap = await getDocs(query(collection(db,'products',id,'reviews'), orderBy('createdAt','desc')));
@@ -1304,6 +1454,8 @@ window.completePurchase = async function() {
   const name = document.getElementById('checkoutName').value.trim();
   const phone = document.getElementById('checkoutPhone').value.trim();
   const address = document.getElementById('checkoutAddress').value.trim();
+  const addressDetail = (document.getElementById('checkoutAddressDetail') || {value:''}).value.trim();
+  const request = (document.getElementById('checkoutRequest') || {value:''}).value.trim();
   if (!name||!phone||!address) { toast('이름, 연락처, 배송지를 입력해주세요.','error'); return; }
 
   const payBtn = document.querySelector('.pay-btn.active');
@@ -1317,7 +1469,7 @@ window.completePurchase = async function() {
       uid: currentUser?.uid||'guest',
       nickname: currentUser?.displayName||name,
       email: currentUser?.email||'',
-      name, phone, address, payMethod, total,
+      name, phone, address: address + (addressDetail ? ' ' + addressDetail : ''), request, payMethod, total,
       items: cart.map(i=>({id:i.id,name:i.name,price:i.price,qty:i.qty,emoji:i.emoji||'🦎'})),
       status:'입금대기',
       date: dateStr,
@@ -1326,7 +1478,8 @@ window.completePurchase = async function() {
     cart=[]; updateCartUI(); closeCheckout();
     toast('🎉 주문 완료! 입금 후 배송이 시작됩니다.','success');
   } catch(e) {
-    toast('주문 처리 중 오류가 발생했어요.','error');
+    console.error('주문 오류:', e.code, e.message);
+    toast('주문 처리 중 오류가 발생했어요.', 'error');
   }
 };
 
@@ -1482,7 +1635,18 @@ function setNewProductImage(file) {
 document.addEventListener('paste', e => {
   if (!document.getElementById('adminPanel').classList.contains('open')) return;
   const item = Array.from(e.clipboardData.items).find(i=>i.type.startsWith('image/'));
-  if (item) { setNewProductImage(item.getAsFile()); toast('이미지 붙여넣기 완료! 📋','success'); }
+  if (!item) return;
+  const file = item.getAsFile();
+  // 포커스된 textarea가 detail-img-row 안에 있으면 해당 행에 적용
+  const activeEl = document.activeElement;
+  const detailRow = activeEl?.closest('.detail-img-row');
+  if (detailRow) {
+    const zone = detailRow.querySelector('.detail-drop-zone');
+    if (zone) { setDetailZoneImage(zone, file); toast('이미지 붙여넣기 완료! 📋','success'); return; }
+  }
+  // 아니면 메인 상품 이미지에 적용
+  setNewProductImage(file);
+  toast('이미지 붙여넣기 완료! 📋','success');
 });
 
 window.submitNewProduct = async function() {
@@ -1511,10 +1675,32 @@ window.submitNewProduct = async function() {
     } catch(e) { toast('이미지 업로드 실패','error'); }
   }
 
+  // 상세 이미지 업로드
+  const detailRows = document.querySelectorAll('.detail-img-row');
+  const detailImages = [];
+  for (const row of detailRows) {
+    const zone = row.querySelector('.detail-drop-zone');
+    const fileInput = row.querySelector('input[type="file"]');
+    const descInput = row.querySelector('textarea');
+    const desc = descInput?.value.trim() || '';
+    // zone._file 우선, 없으면 fileInput
+    const file = zone?._file || fileInput?.files[0] || null;
+    let detailImgUrl = null;
+    if (file) {
+      try {
+        const sRef = ref(storage, `products/detail_${Date.now()}_${file.name}`);
+        const snap = await uploadBytesResumable(sRef, file);
+        detailImgUrl = await getDownloadURL(snap.ref);
+      } catch(e) {}
+    }
+    if (detailImgUrl || desc) detailImages.push({ imageUrl: detailImgUrl, desc });
+  }
+
   await addDoc(collection(db,'products'), {
     name, category, categoryLabel:catLabels[category],
     badge, badgeClass:badge?badgeClasses[badge]:null,
     price, origPrice, emoji, imageUrl,
+    detailImages,
     rating:5.0, reviewCount:0, desc,
     createdAt:serverTimestamp()
   });
@@ -1524,6 +1710,7 @@ window.submitNewProduct = async function() {
   document.getElementById('npImage').value='';
   document.getElementById('imgPreviewWrap').style.display='none';
   document.getElementById('imgPlaceholder').style.display='block';
+  document.getElementById('detailImgList').innerHTML = '';
   newProductImageFile = null;
   btn.disabled=false; btn.textContent='상품 등록';
 
@@ -1544,8 +1731,16 @@ async function adminRenderUsers() {
       <td><span class="status status-new">${u.role==='admin'?'관리자':'일반'}</span></td>
       <td><span class="status ${u.status==='active'?'status-active':'status-blocked'}">${u.status==='active'?'활성':'차단'}</span></td>
       <td><button class="admin-btn" style="padding:4px 10px;font-size:10px" onclick="adminToggleBlock('${esc(u.uid)}','${esc(u.status)}')">${u.status==='active'?'차단':'해제'}</button></td>
-    </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:16px">가입한 회원이 없어요.</td></tr>';
+      <td><button class="admin-btn danger" style="padding:4px 10px;font-size:10px" onclick="adminDeleteUser('${esc(u.uid)}','${esc(u.nickname||'')}')">삭제</button></td>
+    </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:16px">가입한 회원이 없어요.</td></tr>';
 }
+window.adminDeleteUser = async function(uid, nickname) {
+  if (!confirm(`'${nickname}' 회원을 삭제하시겠어요?\n\n* Firestore 데이터가 삭제됩니다.\n* Firebase Auth 계정은 콘솔에서 별도 삭제해주세요.`)) return;
+  await deleteDoc(doc(db,'users',uid));
+  await adminRenderUsers();
+  toast(`'${nickname}' 회원이 삭제됐어요.`, 'success');
+};
+
 window.adminToggleBlock = async function(uid, status) {
   const newStatus = status==='active' ? 'blocked' : 'active';
   await updateDoc(doc(db,'users',uid), {status:newStatus});
@@ -1620,9 +1815,10 @@ window.adminDeleteReview = async function(productId, reviewId) {
 async function adminRenderOrders() {
   const snap = await getDocs(query(collection(db,'orders'), orderBy('createdAt','desc')));
   const orders = snap.docs.map(d=>({id:d.id,...d.data()}));
+  _allOrders = orders;
   const tbody = document.getElementById('adminOrdersTbody');
   tbody.innerHTML = orders.length===0
-    ? '<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:20px">주문이 없어요.</td></tr>'
+    ? '<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:20px">주문이 없어요.</td></tr>'
     : orders.map(o=>`
       <tr>
         <td class="td-mono" style="font-size:10px">${esc(o.date||'—')}</td>
@@ -1642,9 +1838,49 @@ async function adminRenderOrders() {
             <option ${o.status==='취소'?'selected':''}>취소</option>
           </select>
         </td>
+        <td><button class="admin-btn" style="padding:4px 10px;font-size:10px" onclick="showOrderDetail('${esc(o.id)}')">상세</button></td>
         <td><button class="admin-btn danger" style="padding:4px 10px;font-size:10px" onclick="adminDeleteOrder('${esc(o.id)}')">삭제</button></td>
       </tr>`).join('');
 }
+let _allOrders = [];
+
+window.showOrderDetail = function(id) {
+  const o = _allOrders.find(x => x.id === id);
+  if (!o) return;
+  document.getElementById('orderDetailDate').textContent = o.date || '—';
+  const body = document.getElementById('orderDetailBody');
+  const rows = [
+    ['주문자', o.nickname||o.name||'—'],
+    ['연락처', o.phone||'—'],
+    ['배송지', o.address||'—'],
+    ['요청사항', o.request||'없음'],
+    ['결제수단', o.payMethod||'—'],
+    ['상태', o.status||'—'],
+  ];
+  let html = '<div style="display:grid;grid-template-columns:80px 1fr;gap:8px;font-size:13px">';
+  rows.forEach(([k,v]) => {
+    html += `<span style="color:var(--text3);font-weight:700">${k}</span><span>${esc(v)}</span>`;
+  });
+  html += `<span style="color:var(--text3);font-weight:700">금액</span><span style="color:var(--accent);font-weight:800">₩${(o.total||0).toLocaleString()}</span>`;
+  html += '</div>';
+  html += '<div style="border-top:2px solid var(--border);padding-top:12px;margin-top:12px">';
+  html += '<div style="font-size:11px;color:var(--text3);font-weight:700;margin-bottom:8px;font-family:monospace">주문 상품</div>';
+  (o.items||[]).forEach(i => {
+    html += `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
+      <span style="font-size:20px">${i.emoji||'🦎'}</span>
+      <span style="flex:1;font-weight:600">${esc(i.name)}</span>
+      <span style="color:var(--text3)">x${i.qty}</span>
+      <span style="color:var(--accent);font-weight:700">₩${(i.price*i.qty).toLocaleString()}</span>
+    </div>`;
+  });
+  html += '</div>';
+  body.innerHTML = html;
+  document.getElementById('orderDetailModal').classList.add('open');
+  document.getElementById('orderDetailCloseBtn').onclick = closeOrderDetail;
+};
+window.closeOrderDetail = closeOrderDetail;
+window.closeOrderDetail = function() { document.getElementById('orderDetailModal').classList.remove('open'); }
+
 window.adminDeleteOrder = async function(id) {
   if (!confirm('이 주문을 삭제하시겠어요?')) return;
   await deleteDoc(doc(db,'orders',id));
@@ -1710,7 +1946,7 @@ init();
 
 <!-- UI SCRIPT (non-module) -->
 <script>
-function scrollTo(id) { document.getElementById(id)?.scrollIntoView({behavior:'smooth'}); }
+function scrollToSection(id) { document.getElementById(id)?.scrollIntoView({behavior:'smooth'}); }
 function handleUserBtn() {
   const dd = document.getElementById('userDropdown');
   if (document.getElementById('userBtnLabel').textContent==='로그인') openAuth();
@@ -1756,6 +1992,13 @@ function openInquiry() {
 }
 function closeInquiry() { document.getElementById('inquiryModal').classList.remove('open'); document.body.style.overflow=''; }
 function closeAdmin() { document.getElementById('adminPanel').classList.remove('open'); }
+function closeOrderDetail() { document.getElementById('orderDetailModal').classList.remove('open'); }
+document.addEventListener('DOMContentLoaded', function() {
+  document.getElementById('orderDetailCloseBtn')?.addEventListener('click', closeOrderDetail);
+  document.getElementById('orderDetailModal')?.addEventListener('click', function(e) {
+    if (e.target === this) closeOrderDetail();
+  });
+});
 function openMobileNav() { document.getElementById('mobileNav').classList.add('open'); document.body.style.overflow='hidden'; }
 function closeMobileNav() { document.getElementById('mobileNav').classList.remove('open'); document.body.style.overflow=''; }
 </script>
