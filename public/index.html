@@ -286,6 +286,7 @@ nav a:hover{color:var(--accent)}
 /* ADMIN */
 .admin-panel{position:fixed;inset:0;background:var(--bg);z-index:500;display:none;flex-direction:column;overflow:hidden}
   #orderDetailModal{z-index:600}
+  #editProductModal{z-index:600}
 .admin-panel.open{display:flex}
 .admin-topbar{height:54px;background:var(--accent);display:flex;align-items:center;padding:0 22px;gap:14px;flex-shrink:0}
 .admin-topbar-title{font-family:'Nunito',sans-serif;font-size:20px;font-weight:900;color:#fff}
@@ -725,6 +726,45 @@ footer{background:var(--accent);border-top:2px solid var(--border);padding:44px 
       <div class="form-row-actions">
         <button class="admin-btn" onclick="closeInquiry()">취소</button>
         <button class="admin-btn primary" onclick="submitInquiry()">문의 등록</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 상품 수정 모달 -->
+<div class="modal-overlay" id="editProductModal" onclick="if(event.target===this)closeEditProduct()">
+  <div class="notice-write-modal" style="max-width:600px">
+    <div class="notice-modal-header">
+      <span class="notice-modal-title">상품 수정</span>
+      <button class="notice-modal-close" id="editProductCloseBtn">✕</button>
+    </div>
+    <div class="notice-modal-body">
+      <input type="hidden" id="editProductId">
+      <div class="form-grid">
+        <div class="form-group"><label class="form-label">상품명 *</label><input class="form-input" id="editName" placeholder="상품명"></div>
+        <div class="form-group"><label class="form-label">카테고리</label>
+          <select class="form-select" id="editCategory">
+            <option value="habitat">사육환경</option>
+            <option value="feeding">먹이/영양제</option>
+            <option value="accessory">악세서리</option>
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">판매가 *</label><input class="form-input" id="editPrice" type="number"></div>
+        <div class="form-group"><label class="form-label">정가 (할인 시)</label><input class="form-input" id="editOrigPrice" type="number"></div>
+        <div class="form-group"><label class="form-label">뱃지</label>
+          <select class="form-select" id="editBadge">
+            <option value="">없음</option>
+            <option value="NEW">NEW</option>
+            <option value="BEST">BEST</option>
+            <option value="SALE">SALE</option>
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">이모지</label><input class="form-input" id="editEmoji" maxlength="4"></div>
+        <div class="form-group full"><label class="form-label">상품 설명 *</label><textarea class="form-textarea" id="editDesc" rows="4"></textarea></div>
+      </div>
+      <div class="form-row-actions">
+        <button class="admin-btn" id="editProductCancelBtn">취소</button>
+        <button class="admin-btn primary" onclick="submitEditProduct()">수정 완료</button>
       </div>
     </div>
   </div>
@@ -1540,7 +1580,7 @@ window.submitInquiry = async function() {
 };
 
 // ── ADMIN ─────────────────────────────────────────────────
-async function _openAdmin() {
+window._openAdmin = async function() {
   if (!currentUser || !isAdmin || currentUser.email !== ADMIN_EMAIL) {
     toast('관리자 권한이 필요해요.');
     return;
@@ -1602,12 +1642,50 @@ function adminRenderProducts(list) {
       <td class="td-mono">₩${(p.price||0).toLocaleString()}</td>
       <td class="td-mono">⭐ ${p.rating||0}</td>
       <td><span class="status status-active">판매중</span></td>
-      <td><button class="admin-btn danger" style="padding:4px 10px;font-size:10px" onclick="adminDeleteProduct('${esc(p.id)}')">삭제</button></td>
+      <td style="display:flex;gap:6px"><button class="admin-btn" style="padding:4px 10px;font-size:10px" onclick="adminEditProduct('${esc(p.id)}')">수정</button><button class="admin-btn danger" style="padding:4px 10px;font-size:10px" onclick="adminDeleteProduct('${esc(p.id)}')">삭제</button></td>
     </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:16px">상품이 없어요.</td></tr>';
 }
 window.filterAdminProducts = function(q) {
   adminRenderProducts(products.filter(p=>p.name.toLowerCase().includes(q.toLowerCase())));
 };
+window.adminEditProduct = function(id) {
+  const p = products.find(x => x.id === id);
+  if (!p) return;
+  document.getElementById('editProductId').value = id;
+  document.getElementById('editName').value = p.name || '';
+  document.getElementById('editCategory').value = p.category || 'habitat';
+  document.getElementById('editPrice').value = p.price || '';
+  document.getElementById('editOrigPrice').value = p.origPrice || '';
+  document.getElementById('editBadge').value = p.badge || '';
+  document.getElementById('editEmoji').value = p.emoji || '🦎';
+  document.getElementById('editDesc').value = p.desc || '';
+  document.getElementById('editProductModal').classList.add('open');
+};
+
+window.submitEditProduct = async function() {
+  const id = document.getElementById('editProductId').value;
+  const name = document.getElementById('editName').value.trim();
+  const category = document.getElementById('editCategory').value;
+  const price = parseInt(document.getElementById('editPrice').value);
+  const origPriceRaw = document.getElementById('editOrigPrice').value;
+  const origPrice = origPriceRaw ? parseInt(origPriceRaw) : null;
+  const badge = document.getElementById('editBadge').value || null;
+  const emoji = document.getElementById('editEmoji').value || '🦎';
+  const desc = document.getElementById('editDesc').value.trim();
+  if (!name || !price || !desc) { toast('필수 항목을 입력해주세요.'); return; }
+  const catLabels = {habitat:'사육환경', feeding:'먹이/영양제', accessory:'악세서리'};
+  const badgeClasses = {NEW:'badge-new', BEST:'badge-best', SALE:'badge-sale'};
+  await updateDoc(doc(db,'products',id), {
+    name, category, categoryLabel: catLabels[category],
+    badge, badgeClass: badge ? badgeClasses[badge] : null,
+    price, origPrice, emoji, desc
+  });
+  await loadProducts();
+  adminRenderProducts(products);
+  closeEditProduct();
+  toast(`'${name}' 상품이 수정됐어요! ✅`, 'success');
+};
+
 window.adminDeleteProduct = async function(id) {
   if (!confirm('이 상품을 삭제하시겠어요?')) return;
   await deleteDoc(doc(db,'products',id));
@@ -1998,18 +2076,18 @@ function closeInquiry() { document.getElementById('inquiryModal').classList.remo
 function closeAdmin() { document.getElementById('adminPanel').classList.remove('open'); }
 
 // 관리자 버튼 - 이벤트 리스너로만 연결 (콘솔에서 직접 호출 불가)
-document.addEventListener('DOMContentLoaded', function() {
-  document.getElementById('adminMenuLink')?.addEventListener('click', function() {
-    // window에 노출 안 함 - 내부 이벤트로만 동작
-    if (typeof _openAdmin === 'function') _openAdmin();
-  });
-});
+function closeEditProduct() { document.getElementById('editProductModal').classList.remove('open'); }
 function closeOrderDetail() { document.getElementById('orderDetailModal').classList.remove('open'); }
 document.addEventListener('DOMContentLoaded', function() {
+  document.getElementById('adminMenuLink')?.addEventListener('click', function() {
+    if (window._openAdmin) window._openAdmin();
+  });
   document.getElementById('orderDetailCloseBtn')?.addEventListener('click', closeOrderDetail);
   document.getElementById('orderDetailModal')?.addEventListener('click', function(e) {
     if (e.target === this) closeOrderDetail();
   });
+  document.getElementById('editProductCloseBtn')?.addEventListener('click', closeEditProduct);
+  document.getElementById('editProductCancelBtn')?.addEventListener('click', closeEditProduct);
 });
 function openMobileNav() { document.getElementById('mobileNav').classList.add('open'); document.body.style.overflow='hidden'; }
 function closeMobileNav() { document.getElementById('mobileNav').classList.remove('open'); document.body.style.overflow=''; }
