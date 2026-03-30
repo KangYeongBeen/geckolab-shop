@@ -453,7 +453,7 @@ footer{background:var(--accent);border-top:2px solid var(--border);padding:44px 
           <div class="user-dropdown-name" id="dropdownName">—</div>
           <div class="user-dropdown-email" id="dropdownEmail">—</div>
         </div>
-        <a id="adminMenuLink" onclick="openAdmin()" style="display:none">🛡 관리자 패널</a>
+        <a id="adminMenuLink" style="display:none">🛡 관리자 패널</a>
         <a class="danger" onclick="doLogout()">로그아웃</a>
       </div>
     </div>
@@ -1540,14 +1540,18 @@ window.submitInquiry = async function() {
 };
 
 // ── ADMIN ─────────────────────────────────────────────────
-window.openAdmin = async function() {
-  if (!isAdmin) { toast('관리자 권한이 필요해요.'); return; }
+async function _openAdmin() {
+  if (!currentUser || !isAdmin || currentUser.email !== ADMIN_EMAIL) {
+    toast('관리자 권한이 필요해요.');
+    return;
+  }
   document.getElementById('adminPanel').classList.add('open');
   document.getElementById('userDropdown').classList.remove('open');
   await adminRenderDashboard();
 };
 
 window.switchAdmin = async function(page) {
+  if (!isAdmin) return; // 비관리자 차단
   document.querySelectorAll('.admin-nav-item').forEach(el=>el.classList.remove('active'));
   document.querySelectorAll('.admin-page').forEach(el=>el.classList.remove('active'));
   const navEl = document.querySelector(`.admin-nav-item[onclick="switchAdmin('${page}')"]`);
@@ -1992,6 +1996,14 @@ function openInquiry() {
 }
 function closeInquiry() { document.getElementById('inquiryModal').classList.remove('open'); document.body.style.overflow=''; }
 function closeAdmin() { document.getElementById('adminPanel').classList.remove('open'); }
+
+// 관리자 버튼 - 이벤트 리스너로만 연결 (콘솔에서 직접 호출 불가)
+document.addEventListener('DOMContentLoaded', function() {
+  document.getElementById('adminMenuLink')?.addEventListener('click', function() {
+    // window에 노출 안 함 - 내부 이벤트로만 동작
+    if (typeof _openAdmin === 'function') _openAdmin();
+  });
+});
 function closeOrderDetail() { document.getElementById('orderDetailModal').classList.remove('open'); }
 document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('orderDetailCloseBtn')?.addEventListener('click', closeOrderDetail);
